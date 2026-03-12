@@ -43,11 +43,17 @@ def parse_provision_excel(uploaded_file):
     provisions = []
     sondereinnahmen = []
 
-    for col_idx in range(1, len(header_row) - 1):
+    for col_idx in range(1, len(header_row)):
         raw = header_row[col_idx]
+        # Nur Spalten verarbeiten die ein gültiges Datum enthalten (Monate)
+        # Spalten wie 'Comments' oder NaN werden übersprungen
         try:
-            m = pd.to_datetime(str(raw)).strftime("%Y-%m")
+            parsed = pd.to_datetime(str(raw))
+            m = parsed.strftime("%Y-%m")
         except:
+            continue
+        # Zusätzlich prüfen: muss ein realistisches Jahr haben
+        if parsed.year < 2020 or parsed.year > 2030:
             continue
 
         # Provision (Zeile 31 = index 30)
@@ -610,12 +616,20 @@ with tab6:
     prov_fallback = df_hist[df_hist["Provision"] > 0]["Provision"].mean()
     stunden_fallback = df_hist[df_hist["Stunden_gesamt"] > 0]["Stunden_gesamt"].mean()
 
-    # ─── Monate ohne belastbare Provision (laufend/noch nicht abgerechnet) ───
-    # Monate mit Clockify-Daten aber Provision = 0 → als "offen" behandeln
+    # ─── Monate ohne belastbare Provision (offen = in der Zukunft oder kürzlich) ───
+    # Nur Monate die:
+    # 1. Provision = 0 haben
+    # 2. Stunden > 0 haben (Clockify-Daten vorhanden)
+    # 3. NICHT der aktuelle Monat sind
+    # 4. NACH dem letzten Monat mit Provision liegen (also wirklich "noch nicht abgerechnet")
+    letzter_prov_monat = df_main[df_main["Provision"] > 0]["Monat"].max()
+    heute_monat = datetime.today().strftime("%Y-%m")
+
     df_offen = df_main[
         (df_main["Provision"] == 0) &
         (df_main["Stunden_gesamt"] > 0) &
-        (~df_main["Ist_Monat"])  # nicht der aktuelle Monat (der wird separat behandelt)
+        (~df_main["Ist_Monat"]) &
+        (df_main["Monat"] > letzter_prov_monat)  # nur Monate NACH letzter Abrechnung
     ][["Monat"]].copy()
     df_offen["MonatNum"] = pd.to_datetime(df_offen["Monat"]).dt.month
 
@@ -655,7 +669,10 @@ with tab6:
             "_typ": "⚠️ offen"
         })
 
-    # Forecast: nächste 12 Monate
+    # Forecast: nächste 12 Monate – IMMER ab aktuellem Monat+1 in die Zukunft
+    # Offene Monate (z.B. Feb, Mär 2026) werden separat behandelt – nicht nochmal
+    offene_monate_set = set(df_offen["Monat"].tolist()) if len(df_offen) > 0 else set()
+
     forecast_monate = []
     for i in range(1, 13):
         monat_dt = pd.Timestamp(heute.year, heute.month, 1) + pd.DateOffset(months=i)
@@ -689,6 +706,10 @@ with tab6:
         # Max. Personalkosten & Stunden für Ziel-Marge
         max_personalkosten = fc_prov * (1 - ziel_marge / 100)
         max_stunden = max_personalkosten / avg_stundensatz if avg_stundensatz > 0 else 0
+
+        # Monaten die bereits als "offen" behandelt werden überspringen
+        if monat_str in offene_monate_set:
+            continue
 
         forecast_monate.append({
             "Monat": monat_str,
