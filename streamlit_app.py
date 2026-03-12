@@ -28,11 +28,26 @@ if not st.session_state.authenticated:
 # HILFSFUNKTIONEN
 # ─────────────────────────────────────────
 def parse_provision_excel(uploaded_file):
-    """Liest Provision (Zeile 31) und Sondereinnahmen Netto (Zeile 34) aus dem Abrechnungs-Excel."""
-    df = pd.read_excel(uploaded_file, header=None)
+    """Liest Provision (erste Zeile mit 'Provision REVOIC') und Sondereinnahmen aus dem Abrechnungs-Excel."""
+    df = pd.read_excel(uploaded_file, header=None, sheet_name=0)
     header_row = df.iloc[0]
 
-    # Zeile mit "Sondereinnahmen Netto" dynamisch suchen
+    # Provision-Zeile: ERSTE Zeile die exakt 'Provision REVOIC' heißt (ohne Unterstrich)
+    # Es gibt zwei solche Zeilen – wir nehmen immer die ERSTE
+    prov_row_idx = None
+    for i, val in enumerate(df.iloc[:, 0]):
+        if isinstance(val, str) and val.strip().lower() == "provision revoic":
+            prov_row_idx = i
+            break  # erste treffer nehmen, dann stop
+
+    # Fallback: falls nicht gefunden, nach 'provision' suchen (erster Treffer)
+    if prov_row_idx is None:
+        for i, val in enumerate(df.iloc[:, 0]):
+            if isinstance(val, str) and "provision revoic" in val.strip().lower():
+                prov_row_idx = i
+                break
+
+    # Sondereinnahmen-Zeile: erste Zeile mit 'sondereinnahmen'
     sonder_row_idx = None
     for i, val in enumerate(df.iloc[:, 0]):
         if isinstance(val, str) and "sondereinnahmen" in val.lower():
@@ -45,24 +60,24 @@ def parse_provision_excel(uploaded_file):
 
     for col_idx in range(1, len(header_row)):
         raw = header_row[col_idx]
-        # Nur Spalten verarbeiten die ein gültiges Datum enthalten (Monate)
-        # Spalten wie 'Comments' oder NaN werden übersprungen
         try:
             parsed = pd.to_datetime(str(raw))
             m = parsed.strftime("%Y-%m")
         except:
             continue
-        # Zusätzlich prüfen: muss ein realistisches Jahr haben
         if parsed.year < 2020 or parsed.year > 2030:
             continue
 
-        # Provision (Zeile 31 = index 30)
-        try:
-            prov_val = abs(float(df.iloc[30, col_idx]))
-        except:
-            prov_val = 0.0
+        # Provision aus dynamisch gefundener Zeile
+        prov_val = 0.0
+        if prov_row_idx is not None:
+            try:
+                raw_val = df.iloc[prov_row_idx, col_idx]
+                prov_val = abs(float(raw_val))
+            except:
+                prov_val = 0.0
 
-        # Sondereinnahmen Netto (dynamisch gefundene Zeile)
+        # Sondereinnahmen Netto
         sonder_val = 0.0
         if sonder_row_idx is not None:
             try:
@@ -818,3 +833,4 @@ with tab6:
                     "Max. Personalkosten (inkl. Sonder) €", "Max. Stunden (inkl. Sonder)",
                     "Hist. Ø Stunden", "Ist Stunden (aktuell)"]
     st.dataframe(df_fc_display[anzeige_cols], use_container_width=True, hide_index=True)
+
