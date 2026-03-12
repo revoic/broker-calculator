@@ -207,12 +207,13 @@ df_main["Ueberstunden_EUR"] = df_main["Ueberstunden"] * avg_stundensatz
 # ─────────────────────────────────────────
 # TABS
 # ─────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📅 Monatsübersicht",
     "👤 Mitarbeiter",
     "📂 Projektkategorien",
     "📆 Wochenansicht",
-    "🏆 Projektübersicht"
+    "🏆 Projektübersicht",
+    "🔮 Forecast"
 ])
 
 # ─────────── TAB 1: MONATSÜBERSICHT ───────────
@@ -523,3 +524,114 @@ with tab5:
     df_year_display.columns = ["Jahr", "Provision €", "Sonder €", "Erlös gesamt €",
                                 "Personalkosten €", "Profit €", "Stunden", "Über-h", "Marge %", "Eff. €/h"]
     st.dataframe(df_year_display, use_container_width=True, hide_index=True)
+
+# ─────────── TAB 6: FORECAST ───────────
+with tab6:
+    st.subheader("🔮 Forecast: Erlös & Stunden-Budget")
+
+    # ─── EINSTELLUNGEN ───
+    fc1, fc2 = st.columns([1, 2])
+    with fc1:
+        ziel_marge = st.slider("🎯 Ziel-Marge (%)", min_value=5, max_value=60, value=20, step=1)
+        wachstum_pct = st.slider("📈 Umsatzwachstum (%)", min_value=10, max_value=100, value=40, step=5)
+
+    # ─── BASIS: Letzte 12 Monate (Saisonmuster) ───
+    heute = datetime.today()
+    # Alle abgeschlossenen Monate nehmen (nicht laufend)
+    df_hist = df_main[~df_main["Ist_Monat"]].copy()
+    df_hist["MonatNum"] = pd.to_datetime(df_hist["Monat"]).dt.month
+
+    # Saisonales Muster: Durchschnitt pro Kalendermonat über alle Jahre
+    saison = df_hist.groupby("MonatNum").agg(
+        Provision_avg=("Provision", "mean"),
+        Sonder_avg=("Sondereinnahmen", "mean"),
+    ).reset_index()
+    saison["Erloes_avg"] = saison["Provision_avg"] + saison["Sonder_avg"]
+
+    # Forecast: nächste 12 Monate
+    forecast_monate = []
+    for i in range(1, 13):
+        # nächster Monat ab jetzt
+        monat_dt = pd.Timestamp(heute.year, heute.month, 1) + pd.DateOffset(months=i)
+        monat_str = monat_dt.strftime("%Y-%m")
+        monat_num = monat_dt.month
+
+        # Saisonaler Basiswert (nur Provision, Sonder separat)
+        basis_row = saison[saison["MonatNum"] == monat_num]
+        if len(basis_row) > 0:
+            basis_prov = basis_row["Provision_avg"].values[0]
+            basis_sonder = basis_row["Sonder_avg"].values[0]
+        else:
+            basis_prov = df_hist["Provision"].mean()
+            basis_sonder = 0
+
+        # +Wachstum nur auf Provision (Sonder nicht hochrechnen)
+        fc_prov = basis_prov * (1 + wachstum_pct / 100)
+        fc_erloes = fc_prov + basis_sonder
+
+        # Ziel-Stunden: Erlös * (1 - Marge) / Stundensatz
+        max_personalkosten = fc_erloes * (1 - ziel_marge / 100)
+        max_stunden = max_personalkosten / avg_stundensatz if avg_stundensatz > 0 else 0
+
+        # Vergleich mit historischen Ø-Stunden für diesen Monat
+        hist_stunden_row = df_hist[df_hist["MonatNum"] == monat_num]["Stunden_gesamt"].mean() if "MonatNum" in df_hist.columns else 0
+
+        forecast_monate.append({
+            "Monat": monat_str,
+            "Forecast Erlös €": fc_erloes,
+            "Forecast Provision €": fc_prov,
+            "Max. Personalkosten €": max_personalkosten,
+            "Max. Stunden": max_stunden,
+            "Hist. Ø Stunden": hist_stunden_row,
+        })
+
+    df_fc = pd.DataFrame(forecast_monate)
+    df_hist["MonatNum"] = pd.to_datetime(df_hist["Monat"]).dt.month
+
+    with fc2:
+        # KPI-Zeile
+        a1, a2, a3 = st.columns(3)
+        a1.metric("💰 Ø Forecast Erlös/Monat", f"{df_fc['Forecast Erlös €'].mean():,.0f} €".replace(',','.'))
+        a2.metric("⏱️ Max. Stunden/Monat (Ø)", f"{df_fc['Max. Stunden'].mean():.1f} h")
+        a3.metric("🎯 Ziel-Marge", f"{ziel_marge} %")
+
+    st.markdown("---")
+
+    # Chart: Forecast Erlös
+    fig_fc1 = go.Figure()
+    fig_fc1.add_trace(go.Bar(
+        name="Forecast Provision", x=df_fc["Monat"], y=df_fc["Forecast Provision €"],
+        marker_color="#3b82f6"
+    ))
+    fig_fc1.add_trace(go.Bar(
+        name="Max. Personalkosten (Ziel-Marge)", x=df_fc["Monat"], y=df_fc["Max. Personalkosten €"],
+        marker_color="#f59e0b"
+    ))
+    fig_fc1.update_layout(barmode="group", height=340,
+                          title=f"Forecast Erlös vs. max. Personalkosten (Ziel: {ziel_marge}% Marge)",
+                          xaxis_title="", yaxis_title="€")
+    st.plotly_chart(fig_fc1, use_container_width=True)
+
+    # Chart: Max. Stunden vs. historische Stunden
+    fig_fc2 = go.Figure()
+    fig_fc2.add_trace(go.Bar(
+        name="Max. erlaubte Stunden", x=df_fc["Monat"], y=df_fc["Max. Stunden"],
+        marker_color="#10b981"
+    ))
+    fig_fc2.add_trace(go.Scatter(
+        name="Hist. Ø Stunden (saisonal)", x=df_fc["Monat"], y=df_fc["Hist. Ø Stunden"],
+        mode="lines+markers", line=dict(color="#ef4444", width=2, dash="dash")
+    ))
+    fig_fc2.update_layout(height=320,
+                          title="Max. erlaubte Stunden für Ziel-Marge vs. historischer Aufwand",
+                          xaxis_title="", yaxis_title="Stunden")
+    st.plotly_chart(fig_fc2, use_container_width=True)
+
+    # Tabelle
+    st.markdown("### 🗒️ Forecast-Tabelle")
+    df_fc_display = df_fc.copy()
+    for col in ["Forecast Erlös €", "Forecast Provision €", "Max. Personalkosten €"]:
+        df_fc_display[col] = df_fc_display[col].map(lambda x: f"{x:,.0f} €".replace(',','.'))
+    df_fc_display["Max. Stunden"] = df_fc_display["Max. Stunden"].map(lambda x: f"{x:.1f} h")
+    df_fc_display["Hist. Ø Stunden"] = df_fc_display["Hist. Ø Stunden"].map(lambda x: f"{x:.1f} h")
+    st.dataframe(df_fc_display, use_container_width=True, hide_index=True)
