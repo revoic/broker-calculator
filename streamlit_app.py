@@ -547,11 +547,15 @@ with tab6:
         Provision_avg=("Provision", "mean"),
     ).reset_index()
 
-    # Vorjahreswerte pro Kalendermonat (letzter verfügbarer Wert je Monatsnummer)
-    vorjahr = df_hist.copy()
+    # Vorjahreswerte pro Kalendermonat
+    # Nimm für jeden Kalendermonat den aktuellsten Wert > 0 (kein Nullwert)
+    vorjahr = df_hist[df_hist["Provision"] > 0].copy()
     vorjahr["Jahr_int"] = pd.to_datetime(vorjahr["Monat"]).dt.year
-    # Nimm für jeden Kalendermonat den aktuellsten Jahreswert
     vorjahr_latest = vorjahr.sort_values("Monat").groupby("MonatNum").last().reset_index()
+
+    # Fallback: Ø aller Monate mit Provision > 0 (für den Fall, dass ein Monat komplett fehlt)
+    prov_fallback = df_hist[df_hist["Provision"] > 0]["Provision"].mean()
+    stunden_fallback = df_hist[df_hist["Stunden_gesamt"] > 0]["Stunden_gesamt"].mean()
 
     # Forecast: nächste 12 Monate
     forecast_monate = []
@@ -560,14 +564,26 @@ with tab6:
         monat_str = monat_dt.strftime("%Y-%m")
         monat_num = monat_dt.month
 
-        # Vorjahreswert für diesen Kalendermonat
-        vj_row = vorjahr_latest[vorjahr_latest["MonatNum"] == monat_num]
+        # Vorjahreswert für diesen Kalendermonat (nur > 0)
+        vj_row = vorjahr_latest[
+            (vorjahr_latest["MonatNum"] == monat_num) & (vorjahr_latest["Provision"] > 0)
+        ]
         if len(vj_row) > 0:
             vj_prov = vj_row["Provision"].values[0]
-            hist_stunden = vj_row["Stunden_gesamt"].values[0]
+            hist_stunden_val = vj_row["Stunden_gesamt"].values[0]
         else:
-            vj_prov = df_hist["Provision"].mean()
-            hist_stunden = df_hist["Stunden_gesamt"].mean()
+            # Fallback: nächstgelegener Monat mit Daten suchen
+            # Suche den Monat mit der kleinsten Abstand-Differenz in MonatNum
+            if len(vorjahr_latest) > 0:
+                vorjahr_latest["dist"] = (vorjahr_latest["MonatNum"] - monat_num).abs()
+                nearest = vorjahr_latest.sort_values("dist").iloc[0]
+                vj_prov = nearest["Provision"]
+                hist_stunden_val = nearest["Stunden_gesamt"]
+            else:
+                vj_prov = prov_fallback
+                hist_stunden_val = stunden_fallback
+
+        hist_stunden = hist_stunden_val if hist_stunden_val > 0 else stunden_fallback
 
         # Forecast = Vorjahr × Wachstumsfaktor
         fc_prov = vj_prov * (1 + wachstum_pct / 100)
