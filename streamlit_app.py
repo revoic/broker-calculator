@@ -315,10 +315,10 @@ with tab1:
     df_display["Laufend"] = df_display["Ist_Monat"].map({True: "⚠️ laufend", False: ""})
     for col in ["Provision", "Sondereinnahmen", "Erloes_gesamt", "Provision_Forecast", "Personalkosten", "Profit"]:
         df_display[col] = df_display[col].map(lambda x: f"{x:,.0f} €".replace(',', '.'))
-    df_display["Marge"] = df_display["Marge"].map(lambda x: f"{x:.1f} %")
-    df_display["Stunden_gesamt"] = df_display["Stunden_gesamt"].map(lambda x: f"{x:.1f} h")
-    df_display["Break_Even_Stunden"] = df_display["Break_Even_Stunden"].map(lambda x: f"{x:.1f} h")
-    df_display["Ueberstunden"] = df_display["Ueberstunden"].map(lambda x: f"{x:+.1f} h")
+    df_display["Marge"] = df_display["Marge"].map(lambda x: f"{x:.2f} %")
+    df_display["Stunden_gesamt"] = df_display["Stunden_gesamt"].map(lambda x: f"{x:.2f} h")
+    df_display["Break_Even_Stunden"] = df_display["Break_Even_Stunden"].map(lambda x: f"{x:.2f} h")
+    df_display["Ueberstunden"] = df_display["Ueberstunden"].map(lambda x: f"{x:+.2f} h")
     # Jetzt umbenennen
     df_display = df_display.drop(columns=["Ist_Monat"])
     df_display.columns = ["Monat", "Provision €", "Sonder €", "Erlös gesamt €", "Forecast €", "Personalkosten €", "Stunden", "Break-Even h", "Über-h", "Profit €", "Marge %", "Laufend"]
@@ -347,7 +347,7 @@ with tab2:
     st.plotly_chart(fig_ma, use_container_width=True)
 
     # Tabelle
-    ma_agg["Stunden"] = ma_agg["Stunden"].map(lambda x: f"{x:.1f} h")
+    ma_agg["Stunden"] = ma_agg["Stunden"].map(lambda x: f"{x:.2f} h")
     ma_agg["Kosten"] = ma_agg["Kosten"].map(lambda x: f"{x:,.0f} €".replace(',', '.'))
     ma_agg.columns = ["Mitarbeiter", "Stunden", "Personalkosten €"]
     st.dataframe(ma_agg, use_container_width=True, hide_index=True)
@@ -385,7 +385,7 @@ with tab3:
         Stunden=("Stunden", "sum"),
         Kosten=("Kosten", "sum")
     ).reset_index()
-    proj_ma["Stunden"] = proj_ma["Stunden"].map(lambda x: f"{x:.1f} h")
+    proj_ma["Stunden"] = proj_ma["Stunden"].map(lambda x: f"{x:.2f} h")
     proj_ma["Kosten"] = proj_ma["Kosten"].map(lambda x: f"{x:,.0f} €".replace(',', '.'))
     proj_ma.columns = ["Projekt", "Mitarbeiter", "Stunden", "Kosten €"]
     st.dataframe(proj_ma, use_container_width=True, hide_index=True)
@@ -534,9 +534,9 @@ with tab5:
     df_year_display = df_year.copy()
     for col in ["Provision", "Sondereinnahmen", "Erloes_gesamt", "Personalkosten", "Profit"]:
         df_year_display[col] = df_year_display[col].map(lambda x: f"{x:,.0f} €".replace(',','.'))
-    df_year_display["Stunden"] = df_year_display["Stunden"].map(lambda x: f"{x:.1f} h")
-    df_year_display["Ueberstunden"] = df_year_display["Ueberstunden"].map(lambda x: f"{x:+.1f} h")
-    df_year_display["Marge"] = df_year_display["Marge"].map(lambda x: f"{x:.1f} %")
+    df_year_display["Stunden"] = df_year_display["Stunden"].map(lambda x: f"{x:.2f} h")
+    df_year_display["Ueberstunden"] = df_year_display["Ueberstunden"].map(lambda x: f"{x:+.2f} h")
+    df_year_display["Marge"] = df_year_display["Marge"].map(lambda x: f"{x:.2f} %")
     df_year_display["Eff_Stundenlohn"] = df_year_display["Eff_Stundenlohn"].map(lambda x: f"{x:.2f} €/h")
     df_year_display.columns = ["Jahr", "Provision €", "Sonder €", "Erlös gesamt €",
                                 "Personalkosten €", "Profit €", "Stunden", "Über-h", "Marge %", "Eff. €/h"]
@@ -733,7 +733,7 @@ with tab6:
     # KPI-Zeile
     a1, a2, a3 = st.columns(3)
     a1.metric("💰 Ø Forecast Provision/Monat", f"{df_fc['Forecast Provision €'].mean():,.0f} €".replace(',','.'))
-    a2.metric("⏱️ Max. Stunden/Monat (Ø)", f"{df_fc['Max. Stunden'].mean():.1f} h")
+    a2.metric("⏱️ Max. Stunden/Monat (Ø)", f"{df_fc['Max. Stunden'].mean():.2f} h")
     a3.metric("🎯 Ziel-Marge", f"{ziel_marge} %")
 
     st.markdown("---")
@@ -777,21 +777,20 @@ with tab6:
 
     # ─── SONDEREINNAHMEN FORECAST ───
     st.markdown("---")
-    st.markdown("### ⭐ Geplante Sondereinnahmen im Forecast-Zeitraum")
-    st.caption("Trage hier einmalige Sonderzahlungen für einzelne Forecast-Monate ein (Netto). Sie werden zum Forecast-Erlös addiert.")
-
     sonder_fc_eingaben = {}
     fc_monate_liste = df_fc["Monat"].tolist()
-    n_cols = 4
-    rows = [fc_monate_liste[i:i+n_cols] for i in range(0, len(fc_monate_liste), n_cols)]
-    for row_monate in rows:
-        cols_s = st.columns(n_cols)
-        for j, monat in enumerate(row_monate):
-            sonder_fc_eingaben[monat] = cols_s[j].number_input(
-                f"{monat}", min_value=0, max_value=500000,
-                value=0, step=500, key=f"sonder_fc_{monat}",
-                label_visibility="visible"
-            )
+    with st.expander("⭐ Geplante Sondereinnahmen im Forecast-Zeitraum", expanded=False):
+        st.caption("Trage hier einmalige Sonderzahlungen für einzelne Forecast-Monate ein (Netto). Sie werden zum Forecast-Erlös addiert.")
+        n_cols = 4
+        rows = [fc_monate_liste[i:i+n_cols] for i in range(0, len(fc_monate_liste), n_cols)]
+        for row_monate in rows:
+            cols_s = st.columns(n_cols)
+            for j, monat in enumerate(row_monate):
+                sonder_fc_eingaben[monat] = cols_s[j].number_input(
+                    f"{monat}", min_value=0, max_value=500000,
+                    value=0, step=500, key=f"sonder_fc_{monat}",
+                    label_visibility="visible"
+                )
 
     # Sondereinnahmen in df_fc einrechnen
     df_fc["Sondereinnahmen Geplant"] = df_fc["Monat"].map(sonder_fc_eingaben).fillna(0)
@@ -807,11 +806,11 @@ with tab6:
         df_fc_display[col] = df_fc_display[col].map(lambda x: f"{x:,.0f} €".replace(',','.'))
     df_fc_display["Sondereinnahmen Geplant"] = df_fc_display["Sondereinnahmen Geplant"].map(
         lambda x: f"{x:,.0f} €".replace(',','.') if x > 0 else "–")
-    df_fc_display["Max. Stunden"] = df_fc_display["Max. Stunden"].map(lambda x: f"{x:.1f} h")
-    df_fc_display["Max. Stunden (inkl. Sonder)"] = df_fc_display["Max. Stunden (inkl. Sonder)"].map(lambda x: f"{x:.1f} h")
-    df_fc_display["Hist. Ø Stunden"] = df_fc_display["Hist. Ø Stunden"].map(lambda x: f"{x:.1f} h")
+    df_fc_display["Max. Stunden"] = df_fc_display["Max. Stunden"].map(lambda x: f"{x:.2f} h")
+    df_fc_display["Max. Stunden (inkl. Sonder)"] = df_fc_display["Max. Stunden (inkl. Sonder)"].map(lambda x: f"{x:.2f} h")
+    df_fc_display["Hist. Ø Stunden"] = df_fc_display["Hist. Ø Stunden"].map(lambda x: f"{x:.2f} h")
     df_fc_display["Ist Stunden (aktuell)"] = df_fc_display["Ist Stunden (aktuell)"].map(
-        lambda x: f"{x:.1f} h" if x > 0 else "–")
+        lambda x: f"{x:.2f} h" if x > 0 else "–")
     df_fc_display = df_fc_display.rename(columns={"_typ": "Status"})
     # Spalten in sinnvoller Reihenfolge
     anzeige_cols = ["Monat", "Status", "Vorjahr Provision €", "Forecast Provision €",
@@ -819,3 +818,4 @@ with tab6:
                     "Max. Personalkosten (inkl. Sonder) €", "Max. Stunden (inkl. Sonder)",
                     "Hist. Ø Stunden", "Ist Stunden (aktuell)"]
     st.dataframe(df_fc_display[anzeige_cols], use_container_width=True, hide_index=True)
+
