@@ -86,21 +86,50 @@ with st.sidebar:
 
     st.markdown("---")
     st.header("💶 Stundensätze (€/h)")
-    default_rate = 85
-    mitarbeiter_liste = [
-        "Maik Busch", "Talha Gülbahar", "Max Kirchhoff", "Maximilian Lang",
-        "Maggy Roocks", "Verena Behl", "Jannick Müller", "Olena Vasylieva",
-        "Joelina Dietrich", "Mehmet Akkan", "Stephan Bruns", "Speranza Coda",
-        "Alexander Broßmann", "Canel Cekin", "Daniela Heinrich",
-        "Arta Arjana Osmani", "Casie Garnatz", "yemets.oksana"
-    ]
+
+    # Default-Stundensätze laut Screenshot
+    default_rates = {
+        "Maik Busch": 120,
+        "Talha Gülbahar": 70,
+        "Max Kirchhoff": 80,
+        "Maximilian Lang": 75,
+        "Maggy Roocks": 75,
+        "Verena Behl": 90,
+        "Jannick Müller": 35,
+        "Olena Vasylieva": 80,
+        "Joelina Dietrich": 90,
+        "Mehmet Akkan": 80,
+        "Stephan Bruns": 120,
+        "Speranza Coda": 75,
+        "Alexander Broßmann": 80,
+        "Canel Cekin": 75,
+        "Daniela Heinrich": 90,
+        "Arta Arjana Osmani": 75,
+        "Casie Garnatz": 35,
+        "yemets.oksana": 15,
+    }
+    mitarbeiter_liste = list(default_rates.keys())
+
+    # Session State initialisieren
+    for ma, rate in default_rates.items():
+        key = f"rate_{ma}"
+        if key not in st.session_state:
+            st.session_state[key] = rate
+
+    # Reset-Button
+    if st.button("🔄 Auf Standardwerte zurücksetzen"):
+        for ma, rate in default_rates.items():
+            st.session_state[f"rate_{ma}"] = rate
+        st.rerun()
+
     stundensaetze = {}
     with st.expander("Stundensätze anpassen", expanded=False):
         for ma in mitarbeiter_liste:
             stundensaetze[ma] = st.number_input(
                 ma, min_value=0, max_value=500,
-                value=default_rate, step=5, key=f"rate_{ma}"
+                step=1, key=f"rate_{ma}"
             )
+    default_rate = 85
 
     st.markdown("---")
     st.caption("Laufender Monat wird automatisch als unvollständig erkannt und hochgerechnet.")
