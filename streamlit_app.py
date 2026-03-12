@@ -159,6 +159,7 @@ sondereinnahmen = {
     "2024-10": 42290.00,   # Brutto 50.325,10 €
     "2025-04": 29700.00,   # Brutto 35.343,00 €
     "2026-01": 38790.00,   # Brutto 46.160,10 €
+    "2026-04": 30000.00,   # Netto 30.000,00 € (letzte Sonderzahlung)
 }
 df_sonder = pd.DataFrame([
     {"Monat": m, "Sondereinnahmen": v} for m, v in sondereinnahmen.items()
@@ -541,12 +542,10 @@ with tab6:
     df_hist = df_main[~df_main["Ist_Monat"]].copy()
     df_hist["MonatNum"] = pd.to_datetime(df_hist["Monat"]).dt.month
 
-    # Saisonales Muster: Durchschnitt pro Kalendermonat über alle Jahre
+    # Saisonales Muster: Durchschnitt pro Kalendermonat – NUR Provision (keine Sonder!)
     saison = df_hist.groupby("MonatNum").agg(
         Provision_avg=("Provision", "mean"),
-        Sonder_avg=("Sondereinnahmen", "mean"),
     ).reset_index()
-    saison["Erloes_avg"] = saison["Provision_avg"] + saison["Sonder_avg"]
 
     # Forecast: nächste 12 Monate
     forecast_monate = []
@@ -560,14 +559,12 @@ with tab6:
         basis_row = saison[saison["MonatNum"] == monat_num]
         if len(basis_row) > 0:
             basis_prov = basis_row["Provision_avg"].values[0]
-            basis_sonder = basis_row["Sonder_avg"].values[0]
         else:
             basis_prov = df_hist["Provision"].mean()
-            basis_sonder = 0
 
-        # +Wachstum nur auf Provision (Sonder nicht hochrechnen)
+        # Forecast = Provision + Wachstum, KEINE Sondereinnahmen
         fc_prov = basis_prov * (1 + wachstum_pct / 100)
-        fc_erloes = fc_prov + basis_sonder
+        fc_erloes = fc_prov  # nur Provision, kein Sonder
 
         # Ziel-Stunden: Erlös * (1 - Marge) / Stundensatz
         max_personalkosten = fc_erloes * (1 - ziel_marge / 100)
@@ -600,7 +597,7 @@ with tab6:
     # Chart: Forecast Erlös
     fig_fc1 = go.Figure()
     fig_fc1.add_trace(go.Bar(
-        name="Forecast Provision", x=df_fc["Monat"], y=df_fc["Forecast Provision €"],
+        name="Forecast Provision (ohne Sonder)", x=df_fc["Monat"], y=df_fc["Forecast Provision €"],
         marker_color="#3b82f6"
     ))
     fig_fc1.add_trace(go.Bar(
