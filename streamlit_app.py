@@ -152,14 +152,27 @@ alle_monate = sorted(set(df_prov["Monat"].tolist() + df_clock["Monat"].unique().
 df_clock["Stundensatz"] = df_clock["Benutzer"].map(stundensaetze).fillna(default_rate)
 df_clock["Kosten"] = df_clock["Stunden"] * df_clock["Stundensatz"]
 
+# ─────────────────────────────────────────
+# SONDEREINNAHMEN (Netto, nach 19% MwSt)
+# ─────────────────────────────────────────
+sondereinnahmen = {
+    "2024-10": 42290.00,   # Brutto 50.325,10 €
+    "2025-04": 29700.00,   # Brutto 35.343,00 €
+    "2026-01": 38790.00,   # Brutto 46.160,10 €
+}
+df_sonder = pd.DataFrame([
+    {"Monat": m, "Sondereinnahmen": v} for m, v in sondereinnahmen.items()
+])
+
 # Monats-Aggregation
 month_hours = df_clock.groupby("Monat").agg(
     Stunden_gesamt=("Stunden", "sum"),
     Personalkosten=("Kosten", "sum")
 ).reset_index()
 
-# Merge mit Provision
+# Merge mit Provision + Sondereinnahmen
 df_main = df_prov.merge(month_hours, on="Monat", how="outer").fillna(0)
+df_main = df_main.merge(df_sonder, on="Monat", how="left").fillna(0)
 df_main = df_main.sort_values("Monat")
 
 # Laufenden Monat erkennen & Forecast
@@ -169,20 +182,35 @@ df_main["Provision_Forecast"] = df_main.apply(
     lambda r: forecast_current_month(r["Provision"], r["Monat"]) if r["Ist_Monat"] else r["Provision"],
     axis=1
 )
-df_main["Profit"] = df_main["Provision"] - df_main["Personalkosten"]
-df_main["Profit_Forecast"] = df_main["Provision_Forecast"] - df_main["Personalkosten"]
+# Gesamterlös = Provision + Sondereinnahmen
+df_main["Erloes_gesamt"] = df_main["Provision"] + df_main["Sondereinnahmen"]
+df_main["Erloes_gesamt_Forecast"] = df_main["Provision_Forecast"] + df_main["Sondereinnahmen"]
+
+df_main["Profit"] = df_main["Erloes_gesamt"] - df_main["Personalkosten"]
+df_main["Profit_Forecast"] = df_main["Erloes_gesamt_Forecast"] - df_main["Personalkosten"]
 df_main["Marge"] = df_main.apply(
-    lambda r: (r["Profit"] / r["Provision"] * 100) if r["Provision"] > 0 else 0, axis=1
+    lambda r: (r["Profit"] / r["Erloes_gesamt"] * 100) if r["Erloes_gesamt"] > 0 else 0, axis=1
 )
+
+# ─── BREAK-EVEN & ÜBERSTUNDEN ───
+# Ø Stundensatz (gewichtet über alle Mitarbeiter & Stunden)
+total_kosten = df_clock["Kosten"].sum()
+total_stunden = df_clock["Stunden"].sum()
+avg_stundensatz = total_kosten / total_stunden if total_stunden > 0 else 85
+
+df_main["Break_Even_Stunden"] = df_main["Erloes_gesamt"] / avg_stundensatz
+df_main["Ueberstunden"] = df_main["Stunden_gesamt"] - df_main["Break_Even_Stunden"]
+df_main["Ueberstunden_EUR"] = df_main["Ueberstunden"] * avg_stundensatz
 
 # ─────────────────────────────────────────
 # TABS
 # ─────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📅 Monatsübersicht",
     "👤 Mitarbeiter",
     "📂 Projektkategorien",
-    "📆 Wochenansicht"
+    "📆 Wochenansicht",
+    "🏆 Projektübersicht"
 ])
 
 # ─────────── TAB 1: MONATSÜBERSICHT ───────────
@@ -195,17 +223,37 @@ with tab1:
     total_profit = df_main["Profit"].sum()
     total_marge = (total_profit / total_prov * 100) if total_prov > 0 else 0
 
+    total_sonder = df_main["Sondereinnahmen"].sum()
+    total_erloes = df_main["Erloes_gesamt"].sum()
+    avg_ueberstunden = df_main["Ueberstunden"].mean()
+    total_ueberstunden_eur = df_main["Ueberstunden_EUR"].sum()
+
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("💰 Provision gesamt", f"{total_prov:,.0f} €".replace(',', '.'))
+    k1.metric("💰 Erlös gesamt", f"{total_erloes:,.0f} €".replace(',', '.'),
+              delta=f"davon {total_sonder:,.0f} € Sonder".replace(',', '.'))
     k2.metric("👥 Personalkosten gesamt", f"{total_pk:,.0f} €".replace(',', '.'))
     k3.metric("💸 Profit gesamt", f"{total_profit:,.0f} €".replace(',', '.'))
     k4.metric("📊 Ø Marge", f"{total_marge:.1f} %")
 
     st.markdown("---")
 
+    # Überstunden-Box
+    ue_col1, ue_col2, ue_col3 = st.columns(3)
+    ue_col1.metric("⏱️ Ø Überstunden pro Monat",
+                   f"{avg_ueberstunden:+.1f} h",
+                   delta_color="inverse")
+    ue_col2.metric("💸 Verlorener Profit (gesamt)",
+                   f"{total_ueberstunden_eur:,.0f} €".replace(',', '.'),
+                   delta_color="inverse")
+    ue_col3.metric("⚖️ Ø Stundensatz (gewichtet)",
+                   f"{avg_stundensatz:.2f} €/h")
+
+    st.markdown("---")
+
     # Balkendiagramm Provision vs Personalkosten
     fig1 = go.Figure()
-    fig1.add_trace(go.Bar(name="Provision (Ist)", x=df_main["Monat"], y=df_main["Provision"], marker_color="#3b82f6"))
+    fig1.add_trace(go.Bar(name="Provision", x=df_main["Monat"], y=df_main["Provision"], marker_color="#3b82f6"))
+    fig1.add_trace(go.Bar(name="Sondereinnahmen", x=df_main["Monat"], y=df_main["Sondereinnahmen"], marker_color="#f59e0b"))
     fig1.add_trace(go.Bar(name="Provision (Forecast)", x=df_main[df_main["Ist_Monat"]]["Monat"],
                           y=df_main[df_main["Ist_Monat"]]["Provision_Forecast"],
                           marker_color="#93c5fd", opacity=0.7))
@@ -228,10 +276,22 @@ with tab1:
     fig2.update_layout(height=300, title="Profit-Verlauf", xaxis_title="", yaxis_title="€")
     st.plotly_chart(fig2, use_container_width=True)
 
+    # Überstunden-Chart pro Monat
+    fig_ue = go.Figure()
+    fig_ue.add_trace(go.Bar(
+        x=df_main["Monat"], y=df_main["Ueberstunden"],
+        marker_color=df_main["Ueberstunden"].apply(lambda x: "#ef4444" if x > 0 else "#10b981"),
+        name="Über-/Unterstunden"
+    ))
+    fig_ue.add_hline(y=0, line_dash="dash", line_color="gray")
+    fig_ue.update_layout(height=280, title="Über-/Unterstunden pro Monat (+ = zu viel gearbeitet)",
+                         xaxis_title="", yaxis_title="Stunden")
+    st.plotly_chart(fig_ue, use_container_width=True)
+
     # Detailtabelle
     st.subheader("🗒️ Detailtabelle")
-    df_display = df_main[["Monat", "Provision", "Provision_Forecast", "Personalkosten", "Stunden_gesamt", "Profit", "Marge", "Ist_Monat"]].copy()
-    df_display.columns = ["Monat", "Provision (Ist) €", "Provision (Forecast) €", "Personalkosten €", "Stunden", "Profit €", "Marge %", "Laufend"]
+    df_display = df_main[["Monat", "Provision", "Sondereinnahmen", "Erloes_gesamt", "Provision_Forecast", "Personalkosten", "Stunden_gesamt", "Break_Even_Stunden", "Ueberstunden", "Profit", "Marge", "Ist_Monat"]].copy()
+    df_display.columns = ["Monat", "Provision €", "Sonder €", "Erlös gesamt €", "Forecast €", "Personalkosten €", "Stunden", "Break-Even h", "Über-h", "Profit €", "Marge %", "Laufend"]
     df_display["Laufend"] = df_display["Laufend"].map({True: "⚠️ laufend", False: ""})
     for col in ["Provision (Ist) €", "Provision (Forecast) €", "Personalkosten €", "Profit €"]:
         df_display[col] = df_display[col].map(lambda x: f"{x:,.0f} €".replace(',', '.'))
@@ -330,3 +390,102 @@ with tab4:
                        title="Personalkosten pro KW (€)")
     fig_kw_k.update_layout(height=280, xaxis_title="", yaxis_title="€")
     st.plotly_chart(fig_kw_k, use_container_width=True)
+
+# ─────────── TAB 5: PROJEKTÜBERSICHT ───────────
+with tab5:
+    st.subheader("🏆 Gesamtprojekt & Jahresübersicht")
+
+    # Jahr-Spalte ergänzen
+    df_main["Jahr"] = df_main["Monat"].str[:4]
+
+    # ─── GESAMT-KPIs ───
+    st.markdown("### 📊 Gesamtes Projekt (kumuliert)")
+    g1, g2, g3, g4, g5 = st.columns(5)
+    g1.metric("💰 Provision gesamt", f"{df_main['Provision'].sum():,.0f} €".replace(',','.'))
+    g2.metric("⭐ Sondereinnahmen", f"{df_main['Sondereinnahmen'].sum():,.0f} €".replace(',','.'))
+    g3.metric("💸 Erlös gesamt", f"{df_main['Erloes_gesamt'].sum():,.0f} €".replace(',','.'))
+    g4.metric("👥 Personalkosten", f"{df_main['Personalkosten'].sum():,.0f} €".replace(',','.'))
+    g5.metric("💹 Profit gesamt", f"{df_main['Profit'].sum():,.0f} €".replace(',','.'))
+
+    # Gesamtmarge
+    gesamt_erloes = df_main['Erloes_gesamt'].sum()
+    gesamt_profit = df_main['Profit'].sum()
+    gesamt_marge = (gesamt_profit / gesamt_erloes * 100) if gesamt_erloes > 0 else 0
+    gesamt_stunden = df_main['Stunden_gesamt'].sum()
+    eff_stundenlohn = gesamt_erloes / gesamt_stunden if gesamt_stunden > 0 else 0
+
+    gx1, gx2, gx3 = st.columns(3)
+    gx1.metric("📊 Gesamtmarge", f"{gesamt_marge:.1f} %")
+    gx2.metric("⏱️ Gesamtstunden", f"{gesamt_stunden:,.1f} h".replace(',','.'))
+    gx3.metric("⚡ Effektiver Stundenerlös", f"{eff_stundenlohn:.2f} €/h")
+
+    st.markdown("---")
+
+    # ─── JAHRESAGGREGATION ───
+    st.markdown("### 📅 Auswertung nach Jahr")
+    df_year = df_main.groupby("Jahr").agg(
+        Provision=("Provision", "sum"),
+        Sondereinnahmen=("Sondereinnahmen", "sum"),
+        Erloes_gesamt=("Erloes_gesamt", "sum"),
+        Personalkosten=("Personalkosten", "sum"),
+        Profit=("Profit", "sum"),
+        Stunden=("Stunden_gesamt", "sum"),
+        Ueberstunden=("Ueberstunden", "sum"),
+    ).reset_index()
+    df_year["Marge"] = (df_year["Profit"] / df_year["Erloes_gesamt"] * 100).round(1)
+    df_year["Eff_Stundenlohn"] = (df_year["Erloes_gesamt"] / df_year["Stunden"]).round(2)
+
+    # Jahres-Balkendiagramm
+    fig_yr = go.Figure()
+    fig_yr.add_trace(go.Bar(name="Provision", x=df_year["Jahr"], y=df_year["Provision"], marker_color="#3b82f6"))
+    fig_yr.add_trace(go.Bar(name="Sondereinnahmen", x=df_year["Jahr"], y=df_year["Sondereinnahmen"], marker_color="#f59e0b"))
+    fig_yr.add_trace(go.Bar(name="Personalkosten", x=df_year["Jahr"], y=df_year["Personalkosten"], marker_color="#ef4444"))
+    fig_yr.add_trace(go.Scatter(name="Profit", x=df_year["Jahr"], y=df_year["Profit"],
+                                mode="lines+markers+text", line=dict(color="#10b981", width=3),
+                                text=df_year["Profit"].map(lambda x: f"{x:,.0f} €".replace(',','.')),
+                                textposition="top center"))
+    fig_yr.update_layout(barmode="group", height=400,
+                         title="Erlös, Kosten & Profit pro Jahr",
+                         xaxis_title="", yaxis_title="€")
+    st.plotly_chart(fig_yr, use_container_width=True)
+
+    # Erlösanteil Provision vs Sondereinnahmen pro Jahr (gestapelt %)
+    c1, c2 = st.columns(2)
+    with c1:
+        fig_stack = go.Figure()
+        fig_stack.add_trace(go.Bar(name="Provision", x=df_year["Jahr"],
+                                   y=df_year["Provision"] / df_year["Erloes_gesamt"] * 100,
+                                   marker_color="#3b82f6",
+                                   text=(df_year["Provision"] / df_year["Erloes_gesamt"] * 100).map(lambda x: f"{x:.1f}%"),
+                                   textposition="inside"))
+        fig_stack.add_trace(go.Bar(name="Sondereinnahmen", x=df_year["Jahr"],
+                                   y=df_year["Sondereinnahmen"] / df_year["Erloes_gesamt"] * 100,
+                                   marker_color="#f59e0b",
+                                   text=(df_year["Sondereinnahmen"] / df_year["Erloes_gesamt"] * 100).map(lambda x: f"{x:.1f}%"),
+                                   textposition="inside"))
+        fig_stack.update_layout(barmode="stack", height=320,
+                                title="Erlösanteil: Provision vs. Sonder (%)",
+                                yaxis_title="%", xaxis_title="")
+        st.plotly_chart(fig_stack, use_container_width=True)
+
+    with c2:
+        # Gesamtprojekt Donut
+        labels = ["Provision", "Sondereinnahmen"]
+        values = [df_main["Provision"].sum(), df_main["Sondereinnahmen"].sum()]
+        fig_donut = go.Figure(go.Pie(labels=labels, values=values, hole=0.5,
+                                     marker_colors=["#3b82f6", "#f59e0b"]))
+        fig_donut.update_layout(height=320, title="Erlösanteil gesamt (Gesamtprojekt)")
+        st.plotly_chart(fig_donut, use_container_width=True)
+
+    # Jahrestabelle
+    st.markdown("### 🗒️ Jahrestabelle")
+    df_year_display = df_year.copy()
+    for col in ["Provision", "Sondereinnahmen", "Erloes_gesamt", "Personalkosten", "Profit"]:
+        df_year_display[col] = df_year_display[col].map(lambda x: f"{x:,.0f} €".replace(',','.'))
+    df_year_display["Stunden"] = df_year_display["Stunden"].map(lambda x: f"{x:.1f} h")
+    df_year_display["Ueberstunden"] = df_year_display["Ueberstunden"].map(lambda x: f"{x:+.1f} h")
+    df_year_display["Marge"] = df_year_display["Marge"].map(lambda x: f"{x:.1f} %")
+    df_year_display["Eff_Stundenlohn"] = df_year_display["Eff_Stundenlohn"].map(lambda x: f"{x:.2f} €/h")
+    df_year_display.columns = ["Jahr", "Provision €", "Sonder €", "Erlös gesamt €",
+                                "Personalkosten €", "Profit €", "Stunden", "Über-h", "Marge %", "Eff. €/h"]
+    st.dataframe(df_year_display, use_container_width=True, hide_index=True)
