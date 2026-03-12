@@ -171,8 +171,10 @@ month_hours = df_clock.groupby("Monat").agg(
 ).reset_index()
 
 # Merge mit Provision + Sondereinnahmen
-df_main = df_prov.merge(month_hours, on="Monat", how="outer").fillna(0)
-df_main = df_main.merge(df_sonder, on="Monat", how="left").fillna(0)
+# WICHTIG: outer merge auf allen drei Quellen, damit kein Monat verloren geht
+df_main = df_prov.merge(month_hours, on="Monat", how="outer")
+df_main = df_main.merge(df_sonder, on="Monat", how="outer")
+df_main = df_main.fillna(0)
 df_main = df_main.sort_values("Monat")
 
 # Laufenden Monat erkennen & Forecast
@@ -291,12 +293,17 @@ with tab1:
     # Detailtabelle
     st.subheader("🗒️ Detailtabelle")
     df_display = df_main[["Monat", "Provision", "Sondereinnahmen", "Erloes_gesamt", "Provision_Forecast", "Personalkosten", "Stunden_gesamt", "Break_Even_Stunden", "Ueberstunden", "Profit", "Marge", "Ist_Monat"]].copy()
-    df_display.columns = ["Monat", "Provision €", "Sonder €", "Erlös gesamt €", "Forecast €", "Personalkosten €", "Stunden", "Break-Even h", "Über-h", "Profit €", "Marge %", "Laufend"]
-    df_display["Laufend"] = df_display["Laufend"].map({True: "⚠️ laufend", False: ""})
-    for col in ["Provision (Ist) €", "Provision (Forecast) €", "Personalkosten €", "Profit €"]:
+    # Formatierung VOR dem Umbenennen
+    df_display["Laufend"] = df_display["Ist_Monat"].map({True: "⚠️ laufend", False: ""})
+    for col in ["Provision", "Sondereinnahmen", "Erloes_gesamt", "Provision_Forecast", "Personalkosten", "Profit"]:
         df_display[col] = df_display[col].map(lambda x: f"{x:,.0f} €".replace(',', '.'))
-    df_display["Marge %"] = df_display["Marge %"].map(lambda x: f"{x:.1f} %")
-    df_display["Stunden"] = df_display["Stunden"].map(lambda x: f"{x:.1f} h")
+    df_display["Marge"] = df_display["Marge"].map(lambda x: f"{x:.1f} %")
+    df_display["Stunden_gesamt"] = df_display["Stunden_gesamt"].map(lambda x: f"{x:.1f} h")
+    df_display["Break_Even_Stunden"] = df_display["Break_Even_Stunden"].map(lambda x: f"{x:.1f} h")
+    df_display["Ueberstunden"] = df_display["Ueberstunden"].map(lambda x: f"{x:+.1f} h")
+    # Jetzt umbenennen
+    df_display = df_display.drop(columns=["Ist_Monat"])
+    df_display.columns = ["Monat", "Provision €", "Sonder €", "Erlös gesamt €", "Forecast €", "Personalkosten €", "Stunden", "Break-Even h", "Über-h", "Profit €", "Marge %", "Laufend"]
     st.dataframe(df_display, use_container_width=True, hide_index=True)
 
 # ─────────── TAB 2: MITARBEITER ───────────
@@ -400,6 +407,13 @@ with tab5:
 
     # ─── GESAMT-KPIs ───
     st.markdown("### 📊 Gesamtes Projekt (kumuliert)")
+
+    # Gewinn/Verlust-Anzeige Gesamtprojekt
+    gesamt_profit_val = df_main['Profit'].sum()
+    gv_label = f"✅ Überschuss: {gesamt_profit_val:,.0f} €".replace(',','.') if gesamt_profit_val >= 0 else f"🔴 Verlust: {gesamt_profit_val:,.0f} €".replace(',','.')
+    gv_color = "#10b981" if gesamt_profit_val >= 0 else "#ef4444"
+    st.markdown(f"<div style='background:{gv_color}22; border-left: 4px solid {gv_color}; padding: 12px 20px; border-radius:6px; font-size:20px; font-weight:bold; color:{gv_color}'>{gv_label}</div>", unsafe_allow_html=True)
+    st.markdown("")
     g1, g2, g3, g4, g5 = st.columns(5)
     g1.metric("💰 Provision gesamt", f"{df_main['Provision'].sum():,.0f} €".replace(',','.'))
     g2.metric("⭐ Sondereinnahmen", f"{df_main['Sondereinnahmen'].sum():,.0f} €".replace(',','.'))
@@ -423,6 +437,25 @@ with tab5:
 
     # ─── JAHRESAGGREGATION ───
     st.markdown("### 📅 Auswertung nach Jahr")
+
+    # Gewinn/Verlust pro Jahr als farbige Karten
+    jahre = sorted(df_year["Jahr"].unique())
+    cols_jahre = st.columns(len(jahre))
+    for i, jahr in enumerate(jahre):
+        row = df_year[df_year["Jahr"] == jahr].iloc[0]
+        p = row["Profit"]
+        farbe = "#10b981" if p >= 0 else "#ef4444"
+        label = "Überschuss" if p >= 0 else "Verlust"
+        cols_jahre[i].markdown(
+            f"<div style='background:{farbe}22; border-left:4px solid {farbe}; padding:10px 14px; border-radius:6px;'>"
+            f"<div style='font-size:13px; color:#666'>{jahr}</div>"
+            f"<div style='font-size:18px; font-weight:bold; color:{farbe}'>{label}</div>"
+            f"<div style='font-size:22px; font-weight:bold; color:{farbe}'>{p:,.0f} €</div>"
+            f"<div style='font-size:12px; color:#888'>Marge: {row['Marge']:.1f} %</div>"
+            f"</div>", unsafe_allow_html=True
+        )
+    st.markdown("")
+    
     df_year = df_main.groupby("Jahr").agg(
         Provision=("Provision", "sum"),
         Sondereinnahmen=("Sondereinnahmen", "sum"),
