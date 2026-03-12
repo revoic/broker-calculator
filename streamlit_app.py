@@ -17,7 +17,7 @@ if "authenticated" not in st.session_state:
 
 if not st.session_state.authenticated:
     pwd = st.text_input("🔒 Passwort", type="password")
-    if pwd == st.secrets.get("PASSWORD", "revoic2026"):
+    if pwd == st.secrets.get("PASSWORD", ""):
         st.session_state.authenticated = True
         st.rerun()
     elif pwd:
