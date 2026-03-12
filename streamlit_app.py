@@ -547,39 +547,42 @@ with tab6:
         Provision_avg=("Provision", "mean"),
     ).reset_index()
 
+    # Vorjahreswerte pro Kalendermonat (letzter verfügbarer Wert je Monatsnummer)
+    vorjahr = df_hist.copy()
+    vorjahr["Jahr_int"] = pd.to_datetime(vorjahr["Monat"]).dt.year
+    # Nimm für jeden Kalendermonat den aktuellsten Jahreswert
+    vorjahr_latest = vorjahr.sort_values("Monat").groupby("MonatNum").last().reset_index()
+
     # Forecast: nächste 12 Monate
     forecast_monate = []
     for i in range(1, 13):
-        # nächster Monat ab jetzt
         monat_dt = pd.Timestamp(heute.year, heute.month, 1) + pd.DateOffset(months=i)
         monat_str = monat_dt.strftime("%Y-%m")
         monat_num = monat_dt.month
 
-        # Saisonaler Basiswert (nur Provision, Sonder separat)
-        basis_row = saison[saison["MonatNum"] == monat_num]
-        if len(basis_row) > 0:
-            basis_prov = basis_row["Provision_avg"].values[0]
+        # Vorjahreswert für diesen Kalendermonat
+        vj_row = vorjahr_latest[vorjahr_latest["MonatNum"] == monat_num]
+        if len(vj_row) > 0:
+            vj_prov = vj_row["Provision"].values[0]
+            hist_stunden = vj_row["Stunden_gesamt"].values[0]
         else:
-            basis_prov = df_hist["Provision"].mean()
+            vj_prov = df_hist["Provision"].mean()
+            hist_stunden = df_hist["Stunden_gesamt"].mean()
 
-        # Forecast = Provision + Wachstum, KEINE Sondereinnahmen
-        fc_prov = basis_prov * (1 + wachstum_pct / 100)
-        fc_erloes = fc_prov  # nur Provision, kein Sonder
+        # Forecast = Vorjahr × Wachstumsfaktor
+        fc_prov = vj_prov * (1 + wachstum_pct / 100)
 
-        # Ziel-Stunden: Erlös * (1 - Marge) / Stundensatz
-        max_personalkosten = fc_erloes * (1 - ziel_marge / 100)
+        # Max. Personalkosten & Stunden für Ziel-Marge
+        max_personalkosten = fc_prov * (1 - ziel_marge / 100)
         max_stunden = max_personalkosten / avg_stundensatz if avg_stundensatz > 0 else 0
-
-        # Vergleich mit historischen Ø-Stunden für diesen Monat
-        hist_stunden_row = df_hist[df_hist["MonatNum"] == monat_num]["Stunden_gesamt"].mean() if "MonatNum" in df_hist.columns else 0
 
         forecast_monate.append({
             "Monat": monat_str,
-            "Forecast Erlös €": fc_erloes,
+            "Vorjahr Provision €": vj_prov,
             "Forecast Provision €": fc_prov,
             "Max. Personalkosten €": max_personalkosten,
             "Max. Stunden": max_stunden,
-            "Hist. Ø Stunden": hist_stunden_row,
+            "Hist. Ø Stunden": hist_stunden,
         })
 
     df_fc = pd.DataFrame(forecast_monate)
@@ -588,7 +591,7 @@ with tab6:
     with fc2:
         # KPI-Zeile
         a1, a2, a3 = st.columns(3)
-        a1.metric("💰 Ø Forecast Erlös/Monat", f"{df_fc['Forecast Erlös €'].mean():,.0f} €".replace(',','.'))
+        a1.metric("💰 Ø Forecast Provision/Monat", f"{df_fc['Forecast Provision €'].mean():,.0f} €".replace(',','.'))
         a2.metric("⏱️ Max. Stunden/Monat (Ø)", f"{df_fc['Max. Stunden'].mean():.1f} h")
         a3.metric("🎯 Ziel-Marge", f"{ziel_marge} %")
 
@@ -597,15 +600,19 @@ with tab6:
     # Chart: Forecast Erlös
     fig_fc1 = go.Figure()
     fig_fc1.add_trace(go.Bar(
-        name="Forecast Provision (ohne Sonder)", x=df_fc["Monat"], y=df_fc["Forecast Provision €"],
+        name="Vorjahr Provision", x=df_fc["Monat"], y=df_fc["Vorjahr Provision €"],
+        marker_color="#93c5fd"
+    ))
+    fig_fc1.add_trace(go.Bar(
+        name=f"Forecast (+{wachstum_pct}%)", x=df_fc["Monat"], y=df_fc["Forecast Provision €"],
         marker_color="#3b82f6"
     ))
     fig_fc1.add_trace(go.Bar(
         name="Max. Personalkosten (Ziel-Marge)", x=df_fc["Monat"], y=df_fc["Max. Personalkosten €"],
         marker_color="#f59e0b"
     ))
-    fig_fc1.update_layout(barmode="group", height=340,
-                          title=f"Forecast Erlös vs. max. Personalkosten (Ziel: {ziel_marge}% Marge)",
+    fig_fc1.update_layout(barmode="group", height=360,
+                          title=f"Vorjahr vs. Forecast (+{wachstum_pct}%) vs. max. Personalkosten (Ziel: {ziel_marge}% Marge)",
                           xaxis_title="", yaxis_title="€")
     st.plotly_chart(fig_fc1, use_container_width=True)
 
@@ -627,7 +634,7 @@ with tab6:
     # Tabelle
     st.markdown("### 🗒️ Forecast-Tabelle")
     df_fc_display = df_fc.copy()
-    for col in ["Forecast Erlös €", "Forecast Provision €", "Max. Personalkosten €"]:
+    for col in ["Vorjahr Provision €", "Forecast Provision €", "Max. Personalkosten €"]:
         df_fc_display[col] = df_fc_display[col].map(lambda x: f"{x:,.0f} €".replace(',','.'))
     df_fc_display["Max. Stunden"] = df_fc_display["Max. Stunden"].map(lambda x: f"{x:.1f} h")
     df_fc_display["Hist. Ø Stunden"] = df_fc_display["Hist. Ø Stunden"].map(lambda x: f"{x:.1f} h")
