@@ -756,7 +756,7 @@ with tab6:
         marker_color="#f59e0b"
     ))
     fig_fc1.update_layout(barmode="group", height=360,
-                          title=f"Vorjahr vs. Forecast (+{wachstum_pct}%) vs. max. Personalkosten (Ziel: {ziel_marge}% Marge)",
+                          title=f"Vorjahr vs. Forecast (+{wachstum_pct:.1f}%) vs. max. Personalkosten (Ziel: {ziel_marge}% Marge)",
                           xaxis_title="", yaxis_title="€")
     st.plotly_chart(fig_fc1, use_container_width=True)
 
@@ -818,4 +818,3 @@ with tab6:
                     "Max. Personalkosten (inkl. Sonder) €", "Max. Stunden (inkl. Sonder)",
                     "Hist. Ø Stunden", "Ist Stunden (aktuell)"]
     st.dataframe(df_fc_display[anzeige_cols], use_container_width=True, hide_index=True)
-
