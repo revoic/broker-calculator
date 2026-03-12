@@ -438,6 +438,19 @@ with tab5:
     # ─── JAHRESAGGREGATION ───
     st.markdown("### 📅 Auswertung nach Jahr")
 
+    # ERST aggregieren, DANN Karten anzeigen
+    df_year = df_main.groupby("Jahr").agg(
+        Provision=("Provision", "sum"),
+        Sondereinnahmen=("Sondereinnahmen", "sum"),
+        Erloes_gesamt=("Erloes_gesamt", "sum"),
+        Personalkosten=("Personalkosten", "sum"),
+        Profit=("Profit", "sum"),
+        Stunden=("Stunden_gesamt", "sum"),
+        Ueberstunden=("Ueberstunden", "sum"),
+    ).reset_index()
+    df_year["Marge"] = (df_year["Profit"] / df_year["Erloes_gesamt"] * 100).round(1)
+    df_year["Eff_Stundenlohn"] = (df_year["Erloes_gesamt"] / df_year["Stunden"]).round(2)
+
     # Gewinn/Verlust pro Jahr als farbige Karten
     jahre = sorted(df_year["Jahr"].unique())
     cols_jahre = st.columns(len(jahre))
@@ -455,18 +468,6 @@ with tab5:
             f"</div>", unsafe_allow_html=True
         )
     st.markdown("")
-    
-    df_year = df_main.groupby("Jahr").agg(
-        Provision=("Provision", "sum"),
-        Sondereinnahmen=("Sondereinnahmen", "sum"),
-        Erloes_gesamt=("Erloes_gesamt", "sum"),
-        Personalkosten=("Personalkosten", "sum"),
-        Profit=("Profit", "sum"),
-        Stunden=("Stunden_gesamt", "sum"),
-        Ueberstunden=("Ueberstunden", "sum"),
-    ).reset_index()
-    df_year["Marge"] = (df_year["Profit"] / df_year["Erloes_gesamt"] * 100).round(1)
-    df_year["Eff_Stundenlohn"] = (df_year["Erloes_gesamt"] / df_year["Stunden"]).round(2)
 
     # Jahres-Balkendiagramm
     fig_yr = go.Figure()
