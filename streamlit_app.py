@@ -28,26 +28,51 @@ if not st.session_state.authenticated:
 # HILFSFUNKTIONEN
 # ─────────────────────────────────────────
 def parse_provision_excel(uploaded_file):
-    """Liest Provision (Zeile 31) und Monate aus dem Abrechnungs-Excel."""
+    """Liest Provision (Zeile 31) und Sondereinnahmen Netto (Zeile 34) aus dem Abrechnungs-Excel."""
     df = pd.read_excel(uploaded_file, header=None)
-    # Header-Zeile: Spalte 0 = Name, Spalten 1..n-1 = Monate, letzte = Comments
     header_row = df.iloc[0]
+
+    # Zeile mit "Sondereinnahmen Netto" dynamisch suchen
+    sonder_row_idx = None
+    for i, val in enumerate(df.iloc[:, 0]):
+        if isinstance(val, str) and "sondereinnahmen" in val.lower():
+            sonder_row_idx = i
+            break
+
     months = []
     provisions = []
+    sondereinnahmen = []
+
     for col_idx in range(1, len(header_row) - 1):
         raw = header_row[col_idx]
         try:
             m = pd.to_datetime(str(raw)).strftime("%Y-%m")
         except:
             continue
-        prov_val = df.iloc[30, col_idx]  # Zeile 31 = index 30
+
+        # Provision (Zeile 31 = index 30)
         try:
-            prov_val = abs(float(prov_val))
+            prov_val = abs(float(df.iloc[30, col_idx]))
         except:
             prov_val = 0.0
+
+        # Sondereinnahmen Netto (dynamisch gefundene Zeile)
+        sonder_val = 0.0
+        if sonder_row_idx is not None:
+            try:
+                sonder_val = abs(float(df.iloc[sonder_row_idx, col_idx]))
+            except:
+                sonder_val = 0.0
+
         months.append(m)
         provisions.append(prov_val)
-    return pd.DataFrame({"Monat": months, "Provision": provisions})
+        sondereinnahmen.append(sonder_val)
+
+    return pd.DataFrame({
+        "Monat": months,
+        "Provision": provisions,
+        "Sondereinnahmen": sondereinnahmen
+    })
 
 
 def parse_clockify_csv(uploaded_file):
@@ -152,29 +177,14 @@ alle_monate = sorted(set(df_prov["Monat"].tolist() + df_clock["Monat"].unique().
 df_clock["Stundensatz"] = df_clock["Benutzer"].map(stundensaetze).fillna(default_rate)
 df_clock["Kosten"] = df_clock["Stunden"] * df_clock["Stundensatz"]
 
-# ─────────────────────────────────────────
-# SONDEREINNAHMEN (Netto, nach 19% MwSt)
-# ─────────────────────────────────────────
-sondereinnahmen = {
-    "2024-10": 42290.00,   # Brutto 50.325,10 €
-    "2025-04": 29700.00,   # Brutto 35.343,00 €
-    "2026-01": 38790.00,   # Brutto 46.160,10 €
-    "2026-04": 30000.00,   # Netto 30.000,00 € (letzte Sonderzahlung)
-}
-df_sonder = pd.DataFrame([
-    {"Monat": m, "Sondereinnahmen": v} for m, v in sondereinnahmen.items()
-])
-
 # Monats-Aggregation
 month_hours = df_clock.groupby("Monat").agg(
     Stunden_gesamt=("Stunden", "sum"),
     Personalkosten=("Kosten", "sum")
 ).reset_index()
 
-# Merge mit Provision + Sondereinnahmen
-# WICHTIG: outer merge auf allen drei Quellen, damit kein Monat verloren geht
+# Merge – Sondereinnahmen kommen bereits aus dem Excel-Parser
 df_main = df_prov.merge(month_hours, on="Monat", how="outer")
-df_main = df_main.merge(df_sonder, on="Monat", how="outer")
 df_main = df_main.fillna(0)
 df_main = df_main.sort_values("Monat")
 
