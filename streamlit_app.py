@@ -90,12 +90,12 @@ with st.sidebar:
     # Default-Stundensätze laut Screenshot
     default_rates = {
         "Maik Busch": 120,
-        "Talha Gülbahar": 70,
+        "Talha Gülbahar": 58,
         "Max Kirchhoff": 80,
         "Maximilian Lang": 75,
         "Maggy Roocks": 75,
         "Verena Behl": 90,
-        "Jannick Müller": 35,
+        "Jannick Müller": 36,
         "Olena Vasylieva": 80,
         "Joelina Dietrich": 90,
         "Mehmet Akkan": 80,
@@ -105,8 +105,8 @@ with st.sidebar:
         "Canel Cekin": 75,
         "Daniela Heinrich": 90,
         "Arta Arjana Osmani": 75,
-        "Casie Garnatz": 35,
-        "yemets.oksana": 15,
+        "Casie Garnatz": 36,
+        "yemets.oksana": 14,
     }
     mitarbeiter_liste = list(default_rates.keys())
 
