@@ -531,29 +531,72 @@ with tab6:
     st.subheader("🔮 Forecast: Erlös & Stunden-Budget")
 
     # ─── EINSTELLUNGEN ───
+    heute = datetime.today()
+    df_hist = df_main[~df_main["Ist_Monat"]].copy()
+    df_hist["MonatNum"] = pd.to_datetime(df_hist["Monat"]).dt.month
+    df_hist["MonatDt"] = pd.to_datetime(df_hist["Monat"])
+
+    # ─── YoY Wachstum aus letzten 3 Monaten ───
+    # Letzten 3 abgeschlossenen Monate mit Provision > 0
+    df_mit_prov = df_hist[df_hist["Provision"] > 0].sort_values("Monat")
+    letzte3 = df_mit_prov.tail(3)
+
+    # Vorjahreswert für dieselben Kalendermonate
+    yoy_wachstum_liste = []
+    for _, row in letzte3.iterrows():
+        monat_num = row["MonatNum"]
+        monat_dt = row["MonatDt"]
+        vj_dt = monat_dt - pd.DateOffset(years=1)
+        vj_str = vj_dt.strftime("%Y-%m")
+        vj_row = df_hist[(df_hist["Monat"] == vj_str) & (df_hist["Provision"] > 0)]
+        if len(vj_row) > 0:
+            vj_prov = vj_row["Provision"].values[0]
+            if vj_prov > 0:
+                wachstum = (row["Provision"] / vj_prov - 1) * 100
+                yoy_wachstum_liste.append({
+                    "Monat": row["Monat"],
+                    "Vorjahr Monat": vj_str,
+                    "Provision Ist": row["Provision"],
+                    "Provision Vorjahr": vj_prov,
+                    "YoY Wachstum %": wachstum
+                })
+
+    df_yoy = pd.DataFrame(yoy_wachstum_liste)
+    if len(df_yoy) > 0:
+        auto_wachstum = df_yoy["YoY Wachstum %"].mean()
+    else:
+        auto_wachstum = 40.0
+
     fc1, fc2 = st.columns([1, 2])
     with fc1:
         ziel_marge = st.slider("🎯 Ziel-Marge (%)", min_value=5, max_value=60, value=20, step=1)
-        wachstum_pct = st.slider("📈 Umsatzwachstum (%)", min_value=10, max_value=100, value=40, step=5)
+        st.markdown(f"""
+        **📈 Automatisches YoY-Wachstum (letzte 3 Monate):**  
+        **{auto_wachstum:+.1f} %**
+        """)
+        wachstum_override = st.checkbox("✏️ Wachstum manuell übersteuern", value=False)
+        if wachstum_override:
+            wachstum_pct = st.slider("Manuelles Wachstum (%)", min_value=-50, max_value=200,
+                                     value=int(auto_wachstum), step=1)
+        else:
+            wachstum_pct = auto_wachstum
 
-    # ─── BASIS: Letzte 12 Monate (Saisonmuster) ───
-    heute = datetime.today()
-    # Alle abgeschlossenen Monate nehmen (nicht laufend)
-    df_hist = df_main[~df_main["Ist_Monat"]].copy()
-    df_hist["MonatNum"] = pd.to_datetime(df_hist["Monat"]).dt.month
+    # YoY Tabelle anzeigen
+    with fc2:
+        if len(df_yoy) > 0:
+            st.markdown("**📊 YoY-Analyse: Letzte 3 Monate vs. Vorjahr**")
+            df_yoy_display = df_yoy.copy()
+            df_yoy_display["Provision Ist"] = df_yoy_display["Provision Ist"].map(lambda x: f"{x:,.0f} €".replace(',','.'))
+            df_yoy_display["Provision Vorjahr"] = df_yoy_display["Provision Vorjahr"].map(lambda x: f"{x:,.0f} €".replace(',','.'))
+            df_yoy_display["YoY Wachstum %"] = df_yoy_display["YoY Wachstum %"].map(lambda x: f"{x:+.1f} %")
+            st.dataframe(df_yoy_display, use_container_width=True, hide_index=True)
+            st.markdown(f"→ **Ø Wachstum: {auto_wachstum:+.1f}%** → wird als Forecast-Basis verwendet")
 
-    # Saisonales Muster: Durchschnitt pro Kalendermonat – NUR Provision (keine Sonder!)
-    saison = df_hist.groupby("MonatNum").agg(
-        Provision_avg=("Provision", "mean"),
-    ).reset_index()
-
-    # Vorjahreswerte pro Kalendermonat
-    # Nimm für jeden Kalendermonat den aktuellsten Wert > 0 (kein Nullwert)
+    # Vorjahreswerte pro Kalendermonat (nur Provision > 0, aktuellster verfügbarer Wert)
     vorjahr = df_hist[df_hist["Provision"] > 0].copy()
-    vorjahr["Jahr_int"] = pd.to_datetime(vorjahr["Monat"]).dt.year
     vorjahr_latest = vorjahr.sort_values("Monat").groupby("MonatNum").last().reset_index()
 
-    # Fallback: Ø aller Monate mit Provision > 0 (für den Fall, dass ein Monat komplett fehlt)
+    # Fallback
     prov_fallback = df_hist[df_hist["Provision"] > 0]["Provision"].mean()
     stunden_fallback = df_hist[df_hist["Stunden_gesamt"] > 0]["Stunden_gesamt"].mean()
 
@@ -654,12 +697,13 @@ with tab6:
     df_fc = pd.concat([df_offen_fc, df_fc_zukunft], ignore_index=True).sort_values("Monat")
     df_hist["MonatNum"] = pd.to_datetime(df_hist["Monat"]).dt.month
 
-    with fc2:
-        # KPI-Zeile
-        a1, a2, a3 = st.columns(3)
-        a1.metric("💰 Ø Forecast Provision/Monat", f"{df_fc['Forecast Provision €'].mean():,.0f} €".replace(',','.'))
-        a2.metric("⏱️ Max. Stunden/Monat (Ø)", f"{df_fc['Max. Stunden'].mean():.1f} h")
-        a3.metric("🎯 Ziel-Marge", f"{ziel_marge} %")
+    st.markdown("---")
+
+    # KPI-Zeile
+    a1, a2, a3 = st.columns(3)
+    a1.metric("💰 Ø Forecast Provision/Monat", f"{df_fc['Forecast Provision €'].mean():,.0f} €".replace(',','.'))
+    a2.metric("⏱️ Max. Stunden/Monat (Ø)", f"{df_fc['Max. Stunden'].mean():.1f} h")
+    a3.metric("🎯 Ziel-Marge", f"{ziel_marge} %")
 
     st.markdown("---")
 
