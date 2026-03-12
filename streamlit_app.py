@@ -557,6 +557,51 @@ with tab6:
     prov_fallback = df_hist[df_hist["Provision"] > 0]["Provision"].mean()
     stunden_fallback = df_hist[df_hist["Stunden_gesamt"] > 0]["Stunden_gesamt"].mean()
 
+    # ─── Monate ohne belastbare Provision (laufend/noch nicht abgerechnet) ───
+    # Monate mit Clockify-Daten aber Provision = 0 → als "offen" behandeln
+    df_offen = df_main[
+        (df_main["Provision"] == 0) &
+        (df_main["Stunden_gesamt"] > 0) &
+        (~df_main["Ist_Monat"])  # nicht der aktuelle Monat (der wird separat behandelt)
+    ][["Monat"]].copy()
+    df_offen["MonatNum"] = pd.to_datetime(df_offen["Monat"]).dt.month
+
+    offene_forecast = []
+    for _, offen_row in df_offen.iterrows():
+        monat_str = offen_row["Monat"]
+        monat_num = offen_row["MonatNum"]
+        ist_stunden = df_main[df_main["Monat"] == monat_str]["Stunden_gesamt"].values[0]
+
+        vj_row = vorjahr_latest[
+            (vorjahr_latest["MonatNum"] == monat_num) & (vorjahr_latest["Provision"] > 0)
+        ]
+        if len(vj_row) > 0:
+            vj_prov = vj_row["Provision"].values[0]
+            hist_std = vj_row["Stunden_gesamt"].values[0]
+        elif len(vorjahr_latest) > 0:
+            vorjahr_latest["dist"] = (vorjahr_latest["MonatNum"] - monat_num).abs()
+            nearest = vorjahr_latest.sort_values("dist").iloc[0]
+            vj_prov = nearest["Provision"]
+            hist_std = nearest["Stunden_gesamt"]
+        else:
+            vj_prov = prov_fallback
+            hist_std = stunden_fallback
+
+        fc_prov = vj_prov * (1 + wachstum_pct / 100)
+        max_pk = fc_prov * (1 - ziel_marge / 100)
+        max_std = max_pk / avg_stundensatz if avg_stundensatz > 0 else 0
+
+        offene_forecast.append({
+            "Monat": monat_str,
+            "Vorjahr Provision €": vj_prov,
+            "Forecast Provision €": fc_prov,
+            "Max. Personalkosten €": max_pk,
+            "Max. Stunden": max_std,
+            "Hist. Ø Stunden": hist_std,
+            "Ist Stunden (aktuell)": ist_stunden,
+            "_typ": "⚠️ offen"
+        })
+
     # Forecast: nächste 12 Monate
     forecast_monate = []
     for i in range(1, 13):
@@ -599,9 +644,14 @@ with tab6:
             "Max. Personalkosten €": max_personalkosten,
             "Max. Stunden": max_stunden,
             "Hist. Ø Stunden": hist_stunden,
+            "Ist Stunden (aktuell)": 0,
+            "_typ": "Forecast"
         })
 
-    df_fc = pd.DataFrame(forecast_monate)
+    # Offene Monate (Feb/März etc.) + Forecast-Monate zusammenführen
+    df_offen_fc = pd.DataFrame(offene_forecast) if offene_forecast else pd.DataFrame()
+    df_fc_zukunft = pd.DataFrame(forecast_monate)
+    df_fc = pd.concat([df_offen_fc, df_fc_zukunft], ignore_index=True).sort_values("Monat")
     df_hist["MonatNum"] = pd.to_datetime(df_hist["Monat"]).dt.month
 
     with fc2:
@@ -614,14 +664,17 @@ with tab6:
     st.markdown("---")
 
     # Chart: Forecast Erlös
+    # Offene Monate farblich hervorheben
+    bar_colors = df_fc["_typ"].map({"⚠️ offen": "#f97316", "Forecast": "#3b82f6"})
+
     fig_fc1 = go.Figure()
     fig_fc1.add_trace(go.Bar(
         name="Vorjahr Provision", x=df_fc["Monat"], y=df_fc["Vorjahr Provision €"],
         marker_color="#93c5fd"
     ))
     fig_fc1.add_trace(go.Bar(
-        name=f"Forecast (+{wachstum_pct}%)", x=df_fc["Monat"], y=df_fc["Forecast Provision €"],
-        marker_color="#3b82f6"
+        name=f"Forecast (+{wachstum_pct}%) / Offen", x=df_fc["Monat"], y=df_fc["Forecast Provision €"],
+        marker_color=bar_colors.tolist()
     ))
     fig_fc1.add_trace(go.Bar(
         name="Max. Personalkosten (Ziel-Marge)", x=df_fc["Monat"], y=df_fc["Max. Personalkosten €"],
@@ -654,4 +707,6 @@ with tab6:
         df_fc_display[col] = df_fc_display[col].map(lambda x: f"{x:,.0f} €".replace(',','.'))
     df_fc_display["Max. Stunden"] = df_fc_display["Max. Stunden"].map(lambda x: f"{x:.1f} h")
     df_fc_display["Hist. Ø Stunden"] = df_fc_display["Hist. Ø Stunden"].map(lambda x: f"{x:.1f} h")
+    df_fc_display["Ist Stunden (aktuell)"] = df_fc_display["Ist Stunden (aktuell)"].map(lambda x: f"{x:.1f} h" if x > 0 else "–")
+    df_fc_display = df_fc_display.rename(columns={"_typ": "Status"})
     st.dataframe(df_fc_display, use_container_width=True, hide_index=True)
