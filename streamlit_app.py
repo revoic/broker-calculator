@@ -343,7 +343,9 @@ with tab1:
 with tab2:
     st.subheader("👤 Auswertung nach Mitarbeiter")
 
-    monat_filter = st.selectbox("Monat auswählen", ["Alle"] + sorted(df_clock["Monat"].unique().tolist(), reverse=True))
+    # ─── GESAMTANSICHT ───
+    st.markdown("### 📊 Gesamtansicht alle Mitarbeiter")
+    monat_filter = st.selectbox("Monat auswählen", ["Alle"] + sorted(df_clock["Monat"].unique().tolist(), reverse=True), key="ma_monat")
 
     df_ma = df_clock.copy()
     if monat_filter != "Alle":
@@ -354,18 +356,116 @@ with tab2:
         Kosten=("Kosten", "sum")
     ).reset_index().sort_values("Stunden", ascending=False)
 
-    fig_ma = px.bar(ma_agg, x="Benutzer", y="Stunden", text="Stunden",
-                    title="Stunden pro Mitarbeiter",
-                    color="Kosten", color_continuous_scale="Blues")
-    fig_ma.update_traces(texttemplate="%{text:.1f}h", textposition="outside")
-    fig_ma.update_layout(height=400, xaxis_title="", coloraxis_colorbar_title="Kosten €")
+    # Duale Y-Achse: Stunden (Balken) + Kosten (Linie)
+    fig_ma = go.Figure()
+    fig_ma.add_trace(go.Bar(
+        name="Stunden (h)", x=ma_agg["Benutzer"], y=ma_agg["Stunden"],
+        marker_color="#3b82f6", yaxis="y1",
+        text=ma_agg["Stunden"].map(lambda x: f"{x:.1f}h"),
+        textposition="outside"
+    ))
+    fig_ma.add_trace(go.Scatter(
+        name="Kosten (€)", x=ma_agg["Benutzer"], y=ma_agg["Kosten"],
+        mode="markers+text", marker=dict(color="#ef4444", size=10),
+        text=ma_agg["Kosten"].map(lambda x: f"{x:,.0f}€".replace(',','.')),
+        textposition="top center", yaxis="y2"
+    ))
+    fig_ma.update_layout(
+        title="Stunden & Kosten pro Mitarbeiter",
+        height=420, xaxis_title="",
+        yaxis=dict(title="Stunden (h)", side="left"),
+        yaxis2=dict(title="Kosten (€)", side="right", overlaying="y", showgrid=False),
+        legend=dict(orientation="h", y=1.12)
+    )
     st.plotly_chart(fig_ma, use_container_width=True)
 
-    # Tabelle
-    ma_agg["Stunden"] = ma_agg["Stunden"].map(lambda x: f"{x:.2f} h")
-    ma_agg["Kosten"] = ma_agg["Kosten"].map(lambda x: f"{x:,.0f} €".replace(',', '.'))
-    ma_agg.columns = ["Mitarbeiter", "Stunden", "Personalkosten €"]
-    st.dataframe(ma_agg, use_container_width=True, hide_index=True)
+    # Tabelle Gesamtansicht
+    ma_agg_disp = ma_agg.copy()
+    ma_agg_disp["Stunden"] = ma_agg_disp["Stunden"].map(lambda x: f"{x:.2f} h")
+    ma_agg_disp["Kosten"] = ma_agg_disp["Kosten"].map(lambda x: f"{x:,.0f} €".replace(',', '.'))
+    ma_agg_disp.columns = ["Mitarbeiter", "Stunden", "Personalkosten €"]
+    st.dataframe(ma_agg_disp, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # ─── MITARBEITER-DRILLDOWN ───
+    st.markdown("### 🔍 Mitarbeiter-Drilldown")
+    alle_ma = sorted(df_clock["Benutzer"].unique().tolist())
+    selected_ma = st.selectbox("👤 Mitarbeiter auswählen", alle_ma, key="ma_drilldown")
+
+    df_sel = df_clock[df_clock["Benutzer"] == selected_ma].copy()
+
+    # KPIs für diesen Mitarbeiter
+    sel_stunden = df_sel["Stunden"].sum()
+    sel_kosten = df_sel["Kosten"].sum()
+    sel_anteil = (sel_stunden / df_clock["Stunden"].sum() * 100) if df_clock["Stunden"].sum() > 0 else 0
+    sel_monate = df_sel["Monat"].nunique()
+
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("⏱️ Stunden gesamt", f"{sel_stunden:.2f} h")
+    d2.metric("💸 Kosten gesamt", f"{sel_kosten:,.0f} €".replace(',','.'))
+    d3.metric("📊 Anteil am Gesamtaufwand", f"{sel_anteil:.1f} %")
+    d4.metric("📅 Aktive Monate", f"{sel_monate}")
+
+    # Monatsverlauf: Stunden + Kosten
+    st.markdown(f"#### 📈 Monatsverlauf: {selected_ma}")
+    ma_verlauf = df_sel.groupby("Monat").agg(
+        Stunden=("Stunden", "sum"),
+        Kosten=("Kosten", "sum")
+    ).reset_index().sort_values("Monat")
+
+    fig_mv = go.Figure()
+    fig_mv.add_trace(go.Bar(
+        name="Stunden (h)", x=ma_verlauf["Monat"], y=ma_verlauf["Stunden"],
+        marker_color="#3b82f6", yaxis="y1"
+    ))
+    fig_mv.add_trace(go.Scatter(
+        name="Kosten (€)", x=ma_verlauf["Monat"], y=ma_verlauf["Kosten"],
+        mode="lines+markers", line=dict(color="#ef4444", width=2),
+        yaxis="y2"
+    ))
+    fig_mv.update_layout(
+        height=320, xaxis_title="",
+        yaxis=dict(title="Stunden (h)", side="left"),
+        yaxis2=dict(title="Kosten (€)", side="right", overlaying="y", showgrid=False),
+        legend=dict(orientation="h", y=1.12)
+    )
+    st.plotly_chart(fig_mv, use_container_width=True)
+
+    # Kategorie & Themen
+    dr1, dr2 = st.columns(2)
+
+    with dr1:
+        st.markdown(f"#### 📂 Kategorien: {selected_ma}")
+        ma_kat = df_sel.groupby("Projekt").agg(
+            Stunden=("Stunden", "sum")
+        ).reset_index().sort_values("Stunden", ascending=False)
+        fig_kat = px.pie(ma_kat, names="Projekt", values="Stunden", hole=0.4)
+        fig_kat.update_layout(height=300, showlegend=True)
+        st.plotly_chart(fig_kat, use_container_width=True)
+
+    with dr2:
+        st.markdown(f"#### 🔍 Themen-Cluster: {selected_ma}")
+        df_sel["Cluster"] = df_sel["Beschreibung"].apply(auto_cluster)
+        ma_cluster = df_sel.groupby("Cluster").agg(
+            Stunden=("Stunden", "sum")
+        ).reset_index().sort_values("Stunden", ascending=False)
+        fig_cl_ma = px.bar(ma_cluster, x="Cluster", y="Stunden",
+                           text=ma_cluster["Stunden"].map(lambda x: f"{x:.1f}h"),
+                           color="Cluster")
+        fig_cl_ma.update_traces(textposition="outside")
+        fig_cl_ma.update_layout(height=300, showlegend=False,
+                                xaxis_title="", yaxis_title="h",
+                                xaxis_tickangle=-25)
+        st.plotly_chart(fig_cl_ma, use_container_width=True)
+
+    # Top-Zeiteinträge des Mitarbeiters
+    with st.expander(f"🗒️ Top-Zeiteinträge: {selected_ma}", expanded=False):
+        top_entries = df_sel.groupby(["Beschreibung", "Projekt"]).agg(
+            Stunden=("Stunden", "sum")
+        ).reset_index().sort_values("Stunden", ascending=False).head(20)
+        top_entries["Stunden"] = top_entries["Stunden"].map(lambda x: f"{x:.2f} h")
+        st.dataframe(top_entries, use_container_width=True, hide_index=True)
 
 # ─────────── TAB 3: PROJEKTKATEGORIEN ───────────
 with tab3:
@@ -394,9 +494,26 @@ with tab3:
         st.metric("⏱️ Stunden gesamt", f"{gesamt_stunden_proj:.2f} h")
 
     with c2:
-        fig_pk = px.bar(proj_agg, x="Projekt", y=["Stunden", "Kosten"],
-                        barmode="group", title="Stunden & Kosten nach Kategorie")
-        fig_pk.update_layout(height=350, xaxis_title="", yaxis_title="")
+        fig_pk = go.Figure()
+        fig_pk.add_trace(go.Bar(
+            name="Kosten (€)", x=proj_agg["Projekt"], y=proj_agg["Kosten"],
+            marker_color="#3b82f6", yaxis="y1"
+        ))
+        fig_pk.add_trace(go.Scatter(
+            name="Stunden (h)", x=proj_agg["Projekt"], y=proj_agg["Stunden"],
+            mode="markers+text", marker=dict(color="#f59e0b", size=12),
+            text=proj_agg["Stunden"].map(lambda x: f"{x:.1f}h"),
+            textposition="top center", yaxis="y2"
+        ))
+        fig_pk.update_layout(
+            title="Kosten (€) & Stunden (h) nach Kategorie",
+            height=350,
+            xaxis_title="",
+            yaxis=dict(title="Kosten (€)", side="left"),
+            yaxis2=dict(title="Stunden (h)", side="right", overlaying="y",
+                        showgrid=False, rangemode="tozero"),
+            legend=dict(orientation="h", y=1.12)
+        )
         st.plotly_chart(fig_pk, use_container_width=True)
 
     st.markdown("---")
