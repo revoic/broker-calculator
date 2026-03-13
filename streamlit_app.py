@@ -108,6 +108,59 @@ def parse_clockify_csv(uploaded_file):
     return df
 
 
+# Cluster-Definitionen
+cluster_map = {
+    "anlieferung": "Anlieferung / Logistik",
+    "fba": "Anlieferung / Logistik",
+    "logistik": "Anlieferung / Logistik",
+    "abrechnung": "Abrechnung / Controlling",
+    "rechnung": "Abrechnung / Controlling",
+    "eow": "Abrechnung / Controlling",
+    "jour fixe": "Jour Fixe / Meetings",
+    "meeting": "Jour Fixe / Meetings",
+    "call": "Jour Fixe / Meetings",
+    "weekly": "Jour Fixe / Meetings",
+    "besprechung": "Jour Fixe / Meetings",
+    "abstimmung": "Jour Fixe / Meetings",
+    "advertising": "Advertising / Kampagnen",
+    "kampagne": "Advertising / Kampagnen",
+    "ads": "Advertising / Kampagnen",
+    "cm:": "Advertising / Kampagnen",
+    "content": "Content / Listing",
+    "a+": "Content / Listing",
+    "listing": "Content / Listing",
+    "bilder": "Content / Listing",
+    "brand store": "Content / Listing",
+    "text": "Content / Listing",
+    "variante": "Content / Listing",
+    "flat file": "Content / Listing",
+    "health": "Account Health / Support",
+    "kundenfall": "Account Health / Support",
+    "fall": "Account Health / Support",
+    "feedback": "Account Health / Support",
+    "vine": "Account Health / Support",
+    "remission": "Account Health / Support",
+    "buybox": "Account Health / Support",
+    "amalytix": "Monitoring / Tools",
+    "monitoring": "Monitoring / Tools",
+    "dashboard": "Monitoring / Tools",
+    "report": "Monitoring / Tools",
+    "pricing": "Pricing / Automatisierung",
+    "automate": "Pricing / Automatisierung",
+    "preis": "Pricing / Automatisierung",
+    "onboarding": "Onboarding / Setup",
+    "setup": "Onboarding / Setup",
+    "anbindung": "Onboarding / Setup",
+}
+
+def auto_cluster(beschreibung):
+    b = str(beschreibung).lower()
+    for keyword, cluster in cluster_map.items():
+        if keyword in b:
+            return cluster
+    return "Sonstiges"
+
+
 def forecast_current_month(ist_provision, monat_str):
     """Hochrechnung auf Basis vergangener Tage im laufenden Monat."""
     heute = datetime.today()
@@ -535,58 +588,6 @@ with tab3:
     # ─── THEMEN-CLUSTERING (automatisch aus Beschreibungen)
     st.markdown("### 🔍 Automatisches Themen-Clustering")
     st.caption("Häufig wiederkehrende Themen aus den Zeiteinträgen, automatisch erkannt.")
-
-    # Cluster-Definitionen: Keyword → Cluster-Name
-    cluster_map = {
-        "anlieferung": "Anlieferung / Logistik",
-        "fba": "Anlieferung / Logistik",
-        "logistik": "Anlieferung / Logistik",
-        "abrechnung": "Abrechnung / Controlling",
-        "rechnung": "Abrechnung / Controlling",
-        "eow": "Abrechnung / Controlling",
-        "jour fixe": "Jour Fixe / Meetings",
-        "meeting": "Jour Fixe / Meetings",
-        "call": "Jour Fixe / Meetings",
-        "weekly": "Jour Fixe / Meetings",
-        "besprechung": "Jour Fixe / Meetings",
-        "abstimmung": "Jour Fixe / Meetings",
-        "advertising": "Advertising / Kampagnen",
-        "kampagne": "Advertising / Kampagnen",
-        "ads": "Advertising / Kampagnen",
-        "cm:": "Advertising / Kampagnen",
-        "content": "Content / Listing",
-        "a+": "Content / Listing",
-        "listing": "Content / Listing",
-        "bilder": "Content / Listing",
-        "brand store": "Content / Listing",
-        "text": "Content / Listing",
-        "variante": "Content / Listing",
-        "flat file": "Content / Listing",
-        "health": "Account Health / Support",
-        "kundenfall": "Account Health / Support",
-        "fall": "Account Health / Support",
-        "feedback": "Account Health / Support",
-        "vine": "Account Health / Support",
-        "remission": "Account Health / Support",
-        "buybox": "Account Health / Support",
-        "amalytix": "Monitoring / Tools",
-        "monitoring": "Monitoring / Tools",
-        "dashboard": "Monitoring / Tools",
-        "report": "Monitoring / Tools",
-        "pricing": "Pricing / Automatisierung",
-        "automate": "Pricing / Automatisierung",
-        "preis": "Pricing / Automatisierung",
-        "onboarding": "Onboarding / Setup",
-        "setup": "Onboarding / Setup",
-        "anbindung": "Onboarding / Setup",
-    }
-
-    def auto_cluster(beschreibung):
-        b = str(beschreibung).lower()
-        for keyword, cluster in cluster_map.items():
-            if keyword in b:
-                return cluster
-        return "Sonstiges"
 
     df_clock["Cluster"] = df_clock["Beschreibung"].apply(auto_cluster)
 
