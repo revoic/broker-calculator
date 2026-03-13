@@ -372,7 +372,6 @@ with tab3:
     st.subheader("📂 Auswertung nach Projektkategorie")
 
     monat_filter2 = st.selectbox("Monat", ["Alle"] + sorted(df_clock["Monat"].unique().tolist(), reverse=True), key="proj_monat")
-
     df_proj = df_clock.copy()
     if monat_filter2 != "Alle":
         df_proj = df_proj[df_proj["Monat"] == monat_filter2]
@@ -382,19 +381,142 @@ with tab3:
         Kosten=("Kosten", "sum")
     ).reset_index().sort_values("Stunden", ascending=False)
 
+    gesamt_stunden_proj = proj_agg["Stunden"].sum()
+
+    # ─── Donut + Stundensumme + Kosten-Balken
     c1, c2 = st.columns(2)
     with c1:
         fig_pie = px.pie(proj_agg, names="Projekt", values="Stunden",
-                         title="Stundenanteil nach Kategorie", hole=0.4)
+                         title=f"Stundenanteil nach Kategorie", hole=0.4)
+        fig_pie.update_traces(textinfo="percent+label")
+        fig_pie.update_layout(height=350)
         st.plotly_chart(fig_pie, use_container_width=True)
+        st.metric("⏱️ Stunden gesamt", f"{gesamt_stunden_proj:.2f} h")
+
     with c2:
-        fig_pk = px.bar(proj_agg, x="Projekt", y="Kosten", text="Kosten",
-                        title="Kosten nach Kategorie (€)")
-        fig_pk.update_traces(texttemplate="%{text:,.0f}€", textposition="outside")
-        fig_pk.update_layout(height=350, xaxis_title="", yaxis_title="€")
+        fig_pk = px.bar(proj_agg, x="Projekt", y=["Stunden", "Kosten"],
+                        barmode="group", title="Stunden & Kosten nach Kategorie")
+        fig_pk.update_layout(height=350, xaxis_title="", yaxis_title="")
         st.plotly_chart(fig_pk, use_container_width=True)
 
-    # Drilldown: Projekt → Mitarbeiter
+    st.markdown("---")
+
+    # ─── KATEGORIEN-VERLAUF (gestapelter Balken über Monate)
+    st.markdown("### 📈 Stundenentwicklung nach Kategorie (monatlich)")
+    verlauf_agg = df_clock.groupby(["Monat", "Projekt"]).agg(
+        Stunden=("Stunden", "sum")
+    ).reset_index()
+    fig_verlauf = px.bar(verlauf_agg, x="Monat", y="Stunden", color="Projekt",
+                         barmode="stack",
+                         title="Stunden pro Kategorie – monatlicher Verlauf")
+    fig_verlauf.update_layout(height=380, xaxis_title="", yaxis_title="Stunden",
+                               xaxis_tickangle=-45)
+    st.plotly_chart(fig_verlauf, use_container_width=True)
+
+    st.markdown("---")
+
+    # ─── THEMEN-CLUSTERING (automatisch aus Beschreibungen)
+    st.markdown("### 🔍 Automatisches Themen-Clustering")
+    st.caption("Häufig wiederkehrende Themen aus den Zeiteinträgen, automatisch erkannt.")
+
+    # Cluster-Definitionen: Keyword → Cluster-Name
+    cluster_map = {
+        "anlieferung": "Anlieferung / Logistik",
+        "fba": "Anlieferung / Logistik",
+        "logistik": "Anlieferung / Logistik",
+        "abrechnung": "Abrechnung / Controlling",
+        "rechnung": "Abrechnung / Controlling",
+        "eow": "Abrechnung / Controlling",
+        "jour fixe": "Jour Fixe / Meetings",
+        "meeting": "Jour Fixe / Meetings",
+        "call": "Jour Fixe / Meetings",
+        "weekly": "Jour Fixe / Meetings",
+        "besprechung": "Jour Fixe / Meetings",
+        "abstimmung": "Jour Fixe / Meetings",
+        "advertising": "Advertising / Kampagnen",
+        "kampagne": "Advertising / Kampagnen",
+        "ads": "Advertising / Kampagnen",
+        "cm:": "Advertising / Kampagnen",
+        "content": "Content / Listing",
+        "a+": "Content / Listing",
+        "listing": "Content / Listing",
+        "bilder": "Content / Listing",
+        "brand store": "Content / Listing",
+        "text": "Content / Listing",
+        "variante": "Content / Listing",
+        "flat file": "Content / Listing",
+        "health": "Account Health / Support",
+        "kundenfall": "Account Health / Support",
+        "fall": "Account Health / Support",
+        "feedback": "Account Health / Support",
+        "vine": "Account Health / Support",
+        "remission": "Account Health / Support",
+        "buybox": "Account Health / Support",
+        "amalytix": "Monitoring / Tools",
+        "monitoring": "Monitoring / Tools",
+        "dashboard": "Monitoring / Tools",
+        "report": "Monitoring / Tools",
+        "pricing": "Pricing / Automatisierung",
+        "automate": "Pricing / Automatisierung",
+        "preis": "Pricing / Automatisierung",
+        "onboarding": "Onboarding / Setup",
+        "setup": "Onboarding / Setup",
+        "anbindung": "Onboarding / Setup",
+    }
+
+    def auto_cluster(beschreibung):
+        b = str(beschreibung).lower()
+        for keyword, cluster in cluster_map.items():
+            if keyword in b:
+                return cluster
+        return "Sonstiges"
+
+    df_clock["Cluster"] = df_clock["Beschreibung"].apply(auto_cluster)
+
+    df_cluster_filter = df_proj.copy()
+    df_cluster_filter["Cluster"] = df_cluster_filter["Beschreibung"].apply(auto_cluster)
+
+    cluster_agg = df_cluster_filter.groupby("Cluster").agg(
+        Stunden=("Stunden", "sum"),
+        Kosten=("Kosten", "sum"),
+        Einträge=("Beschreibung", "count")
+    ).reset_index().sort_values("Stunden", ascending=False)
+
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        fig_cl = px.bar(cluster_agg, x="Cluster", y="Stunden", text="Stunden",
+                        title="Stunden nach Themen-Cluster",
+                        color="Cluster")
+        fig_cl.update_traces(texttemplate="%{text:.1f}h", textposition="outside")
+        fig_cl.update_layout(height=380, showlegend=False,
+                              xaxis_title="", yaxis_title="Stunden",
+                              xaxis_tickangle=-30)
+        st.plotly_chart(fig_cl, use_container_width=True)
+
+    with cc2:
+        # Top-Beschreibungen pro Cluster
+        top_desc = df_cluster_filter.groupby(["Cluster", "Beschreibung"]).agg(
+            Stunden=("Stunden", "sum")
+        ).reset_index().sort_values("Stunden", ascending=False)
+        top_desc = top_desc.groupby("Cluster").head(3).reset_index(drop=True)
+        top_desc["Stunden"] = top_desc["Stunden"].map(lambda x: f"{x:.2f} h")
+        st.markdown("**Top-Einträge pro Cluster**")
+        st.dataframe(top_desc, use_container_width=True, hide_index=True)
+
+    # Cluster-Verlauf über Monate
+    st.markdown("#### Cluster-Verlauf über Monate")
+    cluster_verlauf = df_clock.groupby(["Monat", "Cluster"]).agg(
+        Stunden=("Stunden", "sum")
+    ).reset_index()
+    fig_cv = px.bar(cluster_verlauf, x="Monat", y="Stunden", color="Cluster",
+                    barmode="stack", title="Themen-Cluster pro Monat (gestapelt)")
+    fig_cv.update_layout(height=360, xaxis_tickangle=-45,
+                          xaxis_title="", yaxis_title="Stunden")
+    st.plotly_chart(fig_cv, use_container_width=True)
+
+    st.markdown("---")
+
+    # ─── Drilldown: Projekt × Mitarbeiter
     st.markdown("#### Detailansicht: Kategorie × Mitarbeiter")
     proj_ma = df_proj.groupby(["Projekt", "Benutzer"]).agg(
         Stunden=("Stunden", "sum"),
@@ -412,24 +534,57 @@ with tab4:
     monat_filter3 = st.selectbox("Monat", sorted(df_clock["Monat"].unique().tolist(), reverse=True), key="week_monat")
     df_week = df_clock[df_clock["Monat"] == monat_filter3]
 
-    kw_agg = df_week.groupby(["KW_Label", "Benutzer"]).agg(
-        Stunden=("Stunden", "sum"),
-        Kosten=("Kosten", "sum")
-    ).reset_index()
+    ansicht_typ = st.radio("Aufschlüsselung nach:", ["Mitarbeiter", "Kategorie", "Beides"], horizontal=True, key="week_ansicht")
+    kw_labels_sorted = sorted(df_week["KW_Label"].unique().tolist())
 
-    fig_week = px.bar(kw_agg, x="KW_Label", y="Stunden", color="Benutzer",
-                      text="Stunden", barmode="stack",
-                      title=f"Stunden pro KW – {monat_filter3}")
-    fig_week.update_traces(texttemplate="%{text:.1f}", textposition="inside")
-    fig_week.update_layout(height=400, xaxis_title="Kalenderwoche", yaxis_title="Stunden")
-    st.plotly_chart(fig_week, use_container_width=True)
+    if ansicht_typ in ["Mitarbeiter", "Beides"]:
+        kw_ma = df_week.groupby(["KW_Label", "Benutzer"]).agg(Stunden=("Stunden", "sum")).reset_index()
+        fig_w_ma = px.bar(kw_ma, x="KW_Label", y="Stunden", color="Benutzer", barmode="stack",
+                          title=f"Stunden pro KW nach Mitarbeiter – {monat_filter3}",
+                          category_orders={"KW_Label": kw_labels_sorted})
+        fig_w_ma.update_layout(height=380, xaxis_title="", yaxis_title="Stunden")
+        st.plotly_chart(fig_w_ma, use_container_width=True)
 
-    # Kosten pro KW
-    kw_kosten = df_week.groupby("KW_Label").agg(Kosten=("Kosten", "sum")).reset_index()
-    fig_kw_k = px.line(kw_kosten, x="KW_Label", y="Kosten", markers=True,
-                       title="Personalkosten pro KW (€)")
-    fig_kw_k.update_layout(height=280, xaxis_title="", yaxis_title="€")
-    st.plotly_chart(fig_kw_k, use_container_width=True)
+    if ansicht_typ in ["Kategorie", "Beides"]:
+        kw_kat = df_week.groupby(["KW_Label", "Projekt"]).agg(Stunden=("Stunden", "sum")).reset_index()
+        fig_w_kat = px.bar(kw_kat, x="KW_Label", y="Stunden", color="Projekt", barmode="stack",
+                           title=f"Stunden pro KW nach Kategorie – {monat_filter3}",
+                           category_orders={"KW_Label": kw_labels_sorted})
+        fig_w_kat.update_layout(height=380, xaxis_title="", yaxis_title="Stunden")
+        st.plotly_chart(fig_w_kat, use_container_width=True)
+
+    # Dual-Axis: Kosten + Stunden pro KW
+    kw_summe = df_week.groupby("KW_Label").agg(
+        Kosten=("Kosten", "sum"), Stunden=("Stunden", "sum")
+    ).reset_index().sort_values("KW_Label")
+    fig_kw_dual = go.Figure()
+    fig_kw_dual.add_trace(go.Bar(
+        name="Personalkosten (€)", x=kw_summe["KW_Label"], y=kw_summe["Kosten"],
+        marker_color="#3b82f6", yaxis="y1"
+    ))
+    fig_kw_dual.add_trace(go.Scatter(
+        name="Stunden (h)", x=kw_summe["KW_Label"], y=kw_summe["Stunden"],
+        mode="lines+markers+text", line=dict(color="#f59e0b", width=2),
+        text=kw_summe["Stunden"].map(lambda x: f"{x:.1f}h"),
+        textposition="top center", yaxis="y2"
+    ))
+    fig_kw_dual.update_layout(
+        height=320, title="Personalkosten (€) & Stunden (h) pro KW",
+        xaxis_title="",
+        yaxis=dict(title="Kosten (€)", side="left"),
+        yaxis2=dict(title="Stunden (h)", side="right", overlaying="y", showgrid=False),
+        legend=dict(orientation="h", y=1.12)
+    )
+    st.plotly_chart(fig_kw_dual, use_container_width=True)
+
+    with st.expander("🗒️ Detailtabelle: KW × Mitarbeiter × Kategorie", expanded=False):
+        kw_detail = df_week.groupby(["KW_Label", "Benutzer", "Projekt"]).agg(
+            Stunden=("Stunden", "sum"), Kosten=("Kosten", "sum")
+        ).reset_index()
+        kw_detail["Stunden"] = kw_detail["Stunden"].map(lambda x: f"{x:.2f} h")
+        kw_detail["Kosten"] = kw_detail["Kosten"].map(lambda x: f"{x:,.0f} €".replace(',','.'))
+        kw_detail.columns = ["KW", "Mitarbeiter", "Kategorie", "Stunden", "Kosten €"]
+        st.dataframe(kw_detail, use_container_width=True, hide_index=True)
 
 # ─────────── TAB 5: PROJEKTÜBERSICHT ───────────
 with tab5:
@@ -833,4 +988,3 @@ with tab6:
                     "Max. Personalkosten (inkl. Sonder) €", "Max. Stunden (inkl. Sonder)",
                     "Hist. Ø Stunden", "Ist Stunden (aktuell)"]
     st.dataframe(df_fc_display[anzeige_cols], use_container_width=True, hide_index=True)
-
